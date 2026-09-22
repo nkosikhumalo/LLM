@@ -1,0 +1,24 @@
+# Build / IDE
+java/target/
+**/.idea/
+**/.vscode/
+*.iml
+*.class
+*.jar
+!**/src/**/*.jar
+
+# Go
+go/bin/
+**/__debug_bin*
+
+# Data & model artifacts (keep folders via .gitkeep)
+data/raw/*
+!data/raw/.gitkeep
+data/tokenized/*
+!data/tokenized/.gitkeep
+models/exported/*
+!models/exported/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
