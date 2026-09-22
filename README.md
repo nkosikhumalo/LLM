@@ -1,50 +1,41 @@
-<h1 align="center">
-  <span style="color:#00ADD8;font-size:2em;font-weight:800;letter-spacing:-1px;">Micro</span><span style="color:#E76F00;font-size:2em;font-weight:800;letter-spacing:-1px;">LLM</span>
-</h1>
-
-<p align="center" style="font-size:1.15em;color:#6b7280;max-width:600px;margin:0 auto;">
-  A language model built from scratch — no Python, no cloud, no magic boxes.<br/>
-  Just <strong style="color:#00ADD8;">Go</strong> and <strong style="color:#E76F00;">Java</strong> doing everything from raw text to generated output.
+<p align="center">
+  <img src="image/title-banner.svg" alt="MicroLLM — Go prepares and serves, Java trains and exports" width="880"/>
 </p>
-
-<br/>
 
 <p align="center">
-  <img src="image/architecture.jpeg" alt="Micro-LLM architecture" width="900"/>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&amp;logo=go&amp;logoColor=white" alt="Go"/></a>
+  <a href="https://www.java.com/"><img src="https://img.shields.io/badge/Java-E76F00?style=for-the-badge&amp;logo=openjdk&amp;logoColor=white" alt="Java"/></a>
+  <img src="https://img.shields.io/badge/from%20scratch-1e293b?style=for-the-badge" alt="From scratch"/>
+  <img src="https://img.shields.io/badge/no%20Python-334155?style=for-the-badge" alt="No Python"/>
 </p>
 
-<br/>
+<p align="center">
+  A language model built from scratch — no Python, no cloud, no magic boxes.<br/>
+  Just <strong>Go</strong> and <strong>Java</strong> doing everything from raw text to generated output.
+</p>
+
+<p align="center">
+  <img src="image/architecture.jpeg" alt="Micro-LLM architecture: Go prepares text, Java trains the model, Go writes answers" width="900"/>
+</p>
 
 ---
 
-<h2 align="center" style="font-size:1.5em;font-weight:800;letter-spacing:0.08em;">
-  <span style="color:#00ADD8;">TWO LANGUAGES.</span>
-  <span style="color:#E76F00;"> ONE PIPELINE.</span>
-  <span style="color:#a855f7;"> ZERO MAGIC.</span>
-</h2>
-
-<p align="center" style="font-size:1.05em;margin-top:0.5em;">
-  <strong style="color:#00ADD8;font-size:1.15em;">Go</strong>
-  <span style="color:#94a3b8;"> &mdash; </span>
-  <span style="color:#22c55e;">tokenize text</span>
-  <span style="color:#94a3b8;"> &nbsp;&middot;&nbsp; </span>
-  <span style="color:#38bdf8;">load weights</span>
-  <span style="color:#94a3b8;"> &nbsp;&middot;&nbsp; </span>
-  <span style="color:#818cf8;">run inference</span>
-  <span style="color:#94a3b8;"> &nbsp;&middot;&nbsp; </span>
-  <span style="color:#34d399;">stream output</span>
+<p align="center">
+  <img src="image/tagline.svg" alt="Two languages. One pipeline. Zero magic." width="880"/>
 </p>
 
-<p align="center" style="font-size:1.05em;">
-  <strong style="color:#E76F00;font-size:1.15em;">Java</strong>
-  <span style="color:#94a3b8;"> &mdash; </span>
-  <span style="color:#fb923c;">build the transformer</span>
-  <span style="color:#94a3b8;"> &nbsp;&middot;&nbsp; </span>
-  <span style="color:#f59e0b;">backpropagate</span>
-  <span style="color:#94a3b8;"> &nbsp;&middot;&nbsp; </span>
-  <span style="color:#ef4444;">optimize</span>
-  <span style="color:#94a3b8;"> &nbsp;&middot;&nbsp; </span>
-  <span style="color:#e879f9;">export weights</span>
+<p align="center">
+  <img src="https://img.shields.io/badge/Go-tokenize-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go tokenize"/>
+  <img src="https://img.shields.io/badge/Go-load%20weights-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go load weights"/>
+  <img src="https://img.shields.io/badge/Go-inference-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go inference"/>
+  <img src="https://img.shields.io/badge/Go-stream%20output-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go stream"/>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Java-transformer-E76F00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java transformer"/>
+  <img src="https://img.shields.io/badge/Java-backprop-E76F00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java backprop"/>
+  <img src="https://img.shields.io/badge/Java-Adam%20%2F%20SGD-E76F00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java optimizer"/>
+  <img src="https://img.shields.io/badge/Java-export%20weights-E76F00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java export"/>
 </p>
 
 ---
@@ -57,13 +48,17 @@ Every part is written by hand. No ML frameworks, no Python, no GPU required. Tra
 
 ---
 
-## Color guide
+## Colour guide
 
-| Color | Side | Job |
-|-------|------|-----|
-| **`#00ADD8` blue** | Go | Tokenize text, load weights, run the model, stream answers |
-| **`#E76F00` orange** | Java | Tensor math, transformer layers, backprop, optimizer, weight export |
-| **`#64748B` slate** | Shared | Data files and weight files used by both sides |
+<p align="center">
+  <img src="image/color-guide.svg" alt="Go blue, Java orange, shared slate" width="880"/>
+</p>
+
+| Side | Colour | Job |
+|------|--------|-----|
+| ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | `#00ADD8` | Tokenize text, load weights, run the model, stream answers |
+| ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | `#E76F00` | Tensor math, transformer layers, backprop, optimizer, weight export |
+| ![Shared](https://img.shields.io/badge/Shared-64748B?style=flat-square) | `#64748B` | Data files and weight files used by both sides |
 
 ---
 
@@ -76,16 +71,19 @@ flowchart LR
     C -->|Go loads| D([Your prompt])
     D -->|Go generates| E([Output text])
 
-    style A fill:#0e7490,color:#fff,stroke:#0e7490
-    style B fill:#0e7490,color:#fff,stroke:#0e7490
-    style C fill:#c2410c,color:#fff,stroke:#c2410c
-    style D fill:#0e7490,color:#fff,stroke:#0e7490
-    style E fill:#065f46,color:#fff,stroke:#065f46
+    style A fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style B fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style C fill:#E76F00,color:#ffffff,stroke:#b45309
+    style D fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style E fill:#059669,color:#ffffff,stroke:#047857
 ```
 
 ---
 
 ## Phase 1 — Training
+
+![Go](https://img.shields.io/badge/Go-data%20prep-00ADD8?style=for-the-badge&logo=go&logoColor=white)
+![Java](https://img.shields.io/badge/Java-training-E76F00?style=for-the-badge&logo=openjdk&logoColor=white)
 
 **Go** turns raw text into numbers. **Java** trains the model on those numbers and saves the result.
 
@@ -110,42 +108,44 @@ flowchart TB
 
     D --> E
 
-    style GO fill:#0c4a6e,color:#fff,stroke:#0369a1
-    style JV fill:#431407,color:#fff,stroke:#c2410c
-    style A fill:#0369a1,color:#fff,stroke:#0369a1
-    style B fill:#0369a1,color:#fff,stroke:#0369a1
-    style C fill:#0369a1,color:#fff,stroke:#0369a1
-    style D fill:#0369a1,color:#fff,stroke:#0369a1
-    style E fill:#9a3412,color:#fff,stroke:#9a3412
-    style F fill:#9a3412,color:#fff,stroke:#9a3412
-    style G fill:#9a3412,color:#fff,stroke:#9a3412
-    style H fill:#9a3412,color:#fff,stroke:#9a3412
-    style I fill:#9a3412,color:#fff,stroke:#9a3412
-    style J fill:#9a3412,color:#fff,stroke:#9a3412
-    style K fill:#9a3412,color:#fff,stroke:#9a3412
-    style L fill:#9a3412,color:#fff,stroke:#9a3412
-    style M fill:#7c2d12,color:#fff,stroke:#7c2d12
+    style GO fill:#e0f7fc,stroke:#00ADD8,color:#0f172a
+    style JV fill:#fff4e5,stroke:#E76F00,color:#0f172a
+    style A fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style B fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style C fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style D fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style E fill:#E76F00,color:#ffffff,stroke:#b45309
+    style F fill:#E76F00,color:#ffffff,stroke:#b45309
+    style G fill:#E76F00,color:#ffffff,stroke:#b45309
+    style H fill:#E76F00,color:#ffffff,stroke:#b45309
+    style I fill:#E76F00,color:#ffffff,stroke:#b45309
+    style J fill:#E76F00,color:#ffffff,stroke:#b45309
+    style K fill:#E76F00,color:#ffffff,stroke:#b45309
+    style L fill:#E76F00,color:#ffffff,stroke:#b45309
+    style M fill:#c2410c,color:#ffffff,stroke:#9a3412
 ```
 
 ### What each step means
 
 | Step | Who | Plain meaning |
 |------|-----|---------------|
-| Character split | Go | Break the text into individual letters and symbols |
-| Assign IDs | Go | Give every character a number (0 to 255) |
-| Save sequences | Go | Write those numbers to disk so Java can read them |
-| Embed tokens | Java | Turn each number into a small list of floats the model can work with |
-| Attention | Java | Let each character look at surrounding characters to understand context |
-| Feed-forward | Java | Extra processing step after attention — adds depth |
-| RMSNorm | Java | Keeps the numbers from getting too big or too small during training |
-| Loss | Java | Measures how wrong the model's prediction was |
-| Backprop | Java | Figures out which weights caused the mistake |
-| Optimizer | Java | Nudges every weight slightly in the right direction |
-| Export | Java | Saves everything the model learned into a file |
+| Character split | ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | Break the text into individual letters and symbols |
+| Assign IDs | ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | Give every character a number (0 to 255) |
+| Save sequences | ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | Write those numbers to disk so Java can read them |
+| Embed tokens | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Turn each number into a small list of floats the model can work with |
+| Attention | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Let each character look at surrounding characters to understand context |
+| Feed-forward | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Extra processing step after attention — adds depth |
+| RMSNorm | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Keeps the numbers from getting too big or too small during training |
+| Loss | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Measures how wrong the model's prediction was |
+| Backprop | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Figures out which weights caused the mistake |
+| Optimizer | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Nudges every weight slightly in the right direction |
+| Export | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Saves everything the model learned into a file |
 
 ---
 
 ## Phase 2 — Inference
+
+![Go only](https://img.shields.io/badge/Go%20only-inference-00ADD8?style=for-the-badge&logo=go&logoColor=white)
 
 Only **Go** here. No Java, no training loop — just load the weights and generate.
 
@@ -160,14 +160,14 @@ flowchart TB
     G --> H([Write character to terminal])
     H -->|next character| D
 
-    style A fill:#0e7490,color:#fff,stroke:#0e7490
-    style B fill:#0e7490,color:#fff,stroke:#0e7490
-    style C fill:#0e7490,color:#fff,stroke:#0e7490
-    style D fill:#0369a1,color:#fff,stroke:#0369a1
-    style E fill:#0369a1,color:#fff,stroke:#0369a1
-    style F fill:#0369a1,color:#fff,stroke:#0369a1
-    style G fill:#0369a1,color:#fff,stroke:#0369a1
-    style H fill:#065f46,color:#fff,stroke:#065f46
+    style A fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style B fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style C fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style D fill:#0891b2,color:#ffffff,stroke:#0e7490
+    style E fill:#0891b2,color:#ffffff,stroke:#0e7490
+    style F fill:#0891b2,color:#ffffff,stroke:#0e7490
+    style G fill:#0891b2,color:#ffffff,stroke:#0e7490
+    style H fill:#059669,color:#ffffff,stroke:#047857
 ```
 
 ### The sampler — three knobs
@@ -187,7 +187,7 @@ The KV-cache is a speed trick — Go stores the attention results for characters
 ```mermaid
 flowchart LR
     subgraph GO ["Go packages"]
-        G1([tokenizer]) 
+        G1([tokenizer])
         G2([loader])
         G3([inference + KV-cache])
         G4([sampler])
@@ -206,19 +206,19 @@ flowchart LR
     G1 -->|token IDs| J6
     J5 -->|weight file| G2
 
-    style GO fill:#0c4a6e,color:#fff,stroke:#0369a1
-    style JAVA fill:#431407,color:#fff,stroke:#c2410c
-    style G1 fill:#0369a1,color:#fff,stroke:#0369a1
-    style G2 fill:#0369a1,color:#fff,stroke:#0369a1
-    style G3 fill:#0369a1,color:#fff,stroke:#0369a1
-    style G4 fill:#0369a1,color:#fff,stroke:#0369a1
-    style G5 fill:#0369a1,color:#fff,stroke:#0369a1
-    style J1 fill:#9a3412,color:#fff,stroke:#9a3412
-    style J2 fill:#9a3412,color:#fff,stroke:#9a3412
-    style J3 fill:#9a3412,color:#fff,stroke:#9a3412
-    style J4 fill:#9a3412,color:#fff,stroke:#9a3412
-    style J5 fill:#9a3412,color:#fff,stroke:#9a3412
-    style J6 fill:#9a3412,color:#fff,stroke:#9a3412
+    style GO fill:#e0f7fc,stroke:#00ADD8,color:#0f172a
+    style JAVA fill:#fff4e5,stroke:#E76F00,color:#0f172a
+    style G1 fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style G2 fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style G3 fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style G4 fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style G5 fill:#00ADD8,color:#ffffff,stroke:#007d99
+    style J1 fill:#E76F00,color:#ffffff,stroke:#b45309
+    style J2 fill:#E76F00,color:#ffffff,stroke:#b45309
+    style J3 fill:#E76F00,color:#ffffff,stroke:#b45309
+    style J4 fill:#E76F00,color:#ffffff,stroke:#b45309
+    style J5 fill:#E76F00,color:#ffffff,stroke:#b45309
+    style J6 fill:#E76F00,color:#ffffff,stroke:#b45309
 ```
 
 ---
@@ -254,6 +254,8 @@ micro-llm/
 │
 ├── models/
 │   └── exported/           ← Java writes weights here, Go reads them
+│
+├── image/                  ← README banners + architecture diagram
 │
 └── scripts/
     ├── tokenize.sh
@@ -295,20 +297,10 @@ No cloud, no GPU, no special hardware.
 
 ---
 
-<br/>
-
-<p align="center" style="font-size:1.2em;letter-spacing:0.04em;">
-  <code style="color:#00ADD8;font-size:1.1em;">text</code>
-  <span style="color:#94a3b8;"> &rarr; </span>
-  <code style="color:#00ADD8;font-size:1.1em;">Go tokenizes</code>
-  <span style="color:#94a3b8;"> &rarr; </span>
-  <code style="color:#E76F00;font-size:1.1em;">Java trains</code>
-  <span style="color:#94a3b8;"> &rarr; </span>
-  <code style="color:#64748B;font-size:1.1em;">weights</code>
-  <span style="color:#94a3b8;"> &rarr; </span>
-  <code style="color:#00ADD8;font-size:1.1em;">Go generates</code>
+<p align="center">
+  <img src="image/pipeline-strip.svg" alt="text → Go tokenizes → Java trains → weights → Go generates" width="880"/>
 </p>
 
 <p align="center">
-  <a href="docs/ARCHITECTURE.md">Architecture deep-dive &rarr;</a>
+  <a href="docs/ARCHITECTURE.md"><img src="https://img.shields.io/badge/Architecture%20deep--dive-1e293b?style=for-the-badge" alt="Architecture deep-dive"/></a>
 </p>
