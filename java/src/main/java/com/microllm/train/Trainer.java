@@ -1,0 +1,3 @@
+package com.microllm.train;import com.microllm.model.Transformer;import com.microllm.optim.*;
+/** Full-context causal next-token trainer. */
+public final class Trainer{private final Transformer model;private final TokenDataset data;private final Optimizer opt;public Trainer(Transformer m,TokenDataset d,double lr){model=m;data=d;opt=new AdamW(m.trainableParameters(),lr);}public double train(int epochs){double loss=0;for(int e=0;e<epochs;e++){opt.zeroGrad();var w=data.window(0,model.config().maxSeqLen());loss=model.trainWindow(w.input(),w.target(),0);opt.step();if((e+1)%Math.max(1,epochs/10)==0)System.out.printf("epoch %d/%d loss %.4f%n",e+1,epochs,loss);}return loss;}}
