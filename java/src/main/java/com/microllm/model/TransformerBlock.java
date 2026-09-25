@@ -1,13 +1,21 @@
 package com.microllm.model;
 
-/**
- * Belongs here: one Transformer block = attention + FFN + norms (+ residuals).
- *
- * Intended contents:
- * - MultiHeadAttention, FeedForward, LayerNorm/RMSNorm instances
- * - Forward (and backward via autograd) for a single layer
- *
- * Stacked by Transformer.
- */
-public class TransformerBlock {
+/** Defines the flat per-layer weight layout shared by model training and export. */
+public final class TransformerBlock {
+    public static final int WEIGHT_COUNT = 8;
+    public static final int ATTENTION_NORM = 0;
+    public static final int QUERY = 1;
+    public static final int KEY = 2;
+    public static final int VALUE = 3;
+    public static final int ATTENTION_OUTPUT = 4;
+    public static final int FEED_FORWARD_NORM = 5;
+    public static final int FEED_FORWARD_INPUT = 6;
+    public static final int FEED_FORWARD_OUTPUT = 7;
+
+    private TransformerBlock() { }
+
+    public static int weightOffset(int layerIndex) {
+        if (layerIndex < 0) throw new IllegalArgumentException("layer index must be nonnegative");
+        return Math.multiplyExact(layerIndex, WEIGHT_COUNT);
+    }
 }
