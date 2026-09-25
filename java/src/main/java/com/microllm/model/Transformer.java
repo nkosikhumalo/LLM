@@ -1,15 +1,313 @@
 package com.microllm.model;
-import com.microllm.layers.MultiHeadAttention;import com.microllm.tensor.*;import java.util.*;
-/** Causal-attention language model. Attention is trained over complete windows; FFN is a zero residual for this milestone. */
-public final class Transformer{
- private final ModelConfig c;private final Tensor token,pos,finalNorm,out;private final Tensor[]w;
- public Transformer(ModelConfig c,long seed){this.c=c;Random r=new Random(seed);token=Tensor.randomNormal(r,.02,c.vocabSize(),c.dModel());pos=Tensor.randomNormal(r,.02,c.maxSeqLen(),c.dModel());finalNorm=Tensor.ones(c.dModel());out=Tensor.randomNormal(r,.02,c.dModel(),c.vocabSize());w=new Tensor[c.nLayers()*8];for(int l=0;l<c.nLayers();l++){int b=l*8;w[b]=Tensor.ones(c.dModel());for(int i=1;i<=4;i++)w[b+i]=Tensor.randomNormal(r,.02,c.dModel(),c.dModel());w[b+5]=Tensor.ones(c.dModel());w[b+6]=Tensor.zeros(c.dModel(),c.dFfn());w[b+7]=Tensor.zeros(c.dFfn(),c.dModel());}}
- public ModelConfig config(){return c;}public Tensor tokenEmbedding(){return token;}public Tensor positionEmbedding(){return pos;}public Tensor finalNorm(){return finalNorm;}public Tensor output(){return out;}public Tensor layerWeight(int i){return w[i];}
- public List<Tensor> trainableParameters(){var p=new ArrayList<Tensor>(List.of(token,pos,out));for(int l=0;l<c.nLayers();l++){int b=l*8;p.add(w[b+1]);p.add(w[b+2]);p.add(w[b+3]);p.add(w[b+4]);}return p;}
- public double trainStep(int input,int position,int target){return trainWindow(new int[]{input},new int[]{target},position);}
- public double trainWindow(int[] input,int[] target,int start){if(input.length==0||input.length!=target.length||input.length>c.maxSeqLen())throw new IllegalArgumentException("invalid window");int n=input.length,d=c.dModel(),v=c.vocabSize();double[][]x=new double[n][d];for(int p=0;p<n;p++)for(int i=0;i<d;i++)x[p][i]=token.get(input[p]*d+i)+pos.get(((start+p)%c.maxSeqLen())*d+i);double[][]before=x;var caches=new MultiHeadAttention.Cache[c.nLayers()];for(int l=0;l<c.nLayers();l++){int b=l*8;double[][]norm=new double[n][d];for(int p=0;p<n;p++)norm[p]=rms(x[p],w[b]);var a=new MultiHeadAttention(d,c.nHeads(),w[b+1].values(),w[b+2].values(),w[b+3].values(),w[b+4].values());caches[l]=a.forward(norm);double[][]next=new double[n][d];for(int p=0;p<n;p++)for(int i=0;i<d;i++)next[p][i]=x[p][i]+caches[l].output()[p][i];x=next;}
- double loss=0;double[][]gx=new double[n][d];for(int p=0;p<n;p++){double[]z=rms(x[p],finalNorm),prob=Ops.softmax(row(z,out,d,v));loss-=Math.log(Math.max(prob[target[p]],1e-12));prob[target[p]]-=1;double[]gn=new double[d];for(int i=0;i<d;i++)for(int j=0;j<v;j++){out.gradient()[i*v+j]+=z[i]*prob[j];gn[i]+=out.get(i*v+j)*prob[j];}gx[p]=rmsBack(gn,x[p],finalNorm);}
- for(int l=c.nLayers()-1;l>=0;l--){int b=l*8;var a=new MultiHeadAttention(d,c.nHeads(),w[b+1].values(),w[b+2].values(),w[b+3].values(),w[b+4].values());var g=a.backward(caches[l],gx);add(w[b+1].gradient(),g.q());add(w[b+2].gradient(),g.k());add(w[b+3].gradient(),g.v());add(w[b+4].gradient(),g.o());double[][]next=new double[n][d];for(int p=0;p<n;p++)next[p]=rmsBack(g.input()[p],before[p],w[b]);gx=next;}
- for(int p=0;p<n;p++)for(int i=0;i<d;i++){token.gradient()[input[p]*d+i]+=gx[p][i];pos.gradient()[((start+p)%c.maxSeqLen())*d+i]+=gx[p][i];}return loss/n;}
- private double[]rms(double[]x,Tensor s){double q=0;for(double z:x)q+=z*z;double inv=1/Math.sqrt(q/x.length+c.rmsNormEpsilon());double[]y=new double[x.length];for(int i=0;i<x.length;i++)y[i]=x[i]*inv*s.get(i);return y;}private double[]rmsBack(double[]g,double[]x,Tensor s){double q=0,dot=0;for(int i=0;i<x.length;i++){q+=x[i]*x[i];dot+=g[i]*s.get(i)*x[i];}double inv=1/Math.sqrt(q/x.length+c.rmsNormEpsilon());double[]y=new double[x.length];for(int i=0;i<x.length;i++)y[i]=inv*g[i]*s.get(i)-x[i]*dot*inv*inv*inv/x.length;return y;}private static double[]row(double[]x,Tensor m,int r,int col){double[]y=new double[col];for(int i=0;i<r;i++)for(int j=0;j<col;j++)y[j]+=x[i]*m.get(i*col+j);return y;}private static void add(double[]a,double[]b){for(int i=0;i<a.length;i++)a[i]+=b[i];}
+
+import com.microllm.layers.FeedForward;
+import com.microllm.layers.MultiHeadAttention;
+import com.microllm.tensor.Ops;
+import com.microllm.tensor.Tensor;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+/**
+ * Causal Transformer language model with trained attention and GELU FFN residuals.
+ */
+public final class Transformer {
+    private final ModelConfig config;
+    private final Tensor tokenEmbedding;
+    private final Tensor positionEmbedding;
+    private final Tensor finalNorm;
+    private final Tensor output;
+    /** Per layer: attn_norm, q, k, v, o, ffn_norm, ffn_in, ffn_out. */
+    private final Tensor[] layerWeights;
+    private final Random dropoutRandom;
+    private static final double DROPOUT_RATE = 0.1;
+
+    public Transformer(ModelConfig config, long seed) {
+        this.config = config;
+        Random random = new Random(seed);
+        dropoutRandom = new Random(seed ^ 0x5DEECE66DL);
+        tokenEmbedding = Tensor.randomNormal(random, 0.02, config.vocabSize(), config.dModel());
+        positionEmbedding = Tensor.randomNormal(random, 0.02, config.maxSeqLen(), config.dModel());
+        finalNorm = Tensor.ones(config.dModel());
+        output = Tensor.randomNormal(random, 0.02, config.dModel(), config.vocabSize());
+        layerWeights = new Tensor[config.nLayers() * TransformerBlock.WEIGHT_COUNT];
+        for (int layer = 0; layer < config.nLayers(); layer++) {
+            int base = TransformerBlock.weightOffset(layer);
+            layerWeights[base] = Tensor.ones(config.dModel());
+            for (int i = 1; i <= 4; i++) {
+                layerWeights[base + i] = Tensor.randomNormal(random, 0.02, config.dModel(), config.dModel());
+            }
+            layerWeights[base + 5] = Tensor.ones(config.dModel());
+            layerWeights[base + 6] = Tensor.randomNormal(random, 0.02, config.dModel(), config.dFfn());
+            layerWeights[base + 7] = Tensor.randomNormal(random, 0.02, config.dFfn(), config.dModel());
+        }
+    }
+
+    public ModelConfig config() {
+        return config;
+    }
+
+    public Tensor tokenEmbedding() {
+        return tokenEmbedding;
+    }
+
+    public Tensor positionEmbedding() {
+        return positionEmbedding;
+    }
+
+    public Tensor finalNorm() {
+        return finalNorm;
+    }
+
+    public Tensor output() {
+        return output;
+    }
+
+    public Tensor layerWeight(int index) {
+        return layerWeights[index];
+    }
+
+    public List<Tensor> trainableParameters() {
+        List<Tensor> parameters = new ArrayList<>();
+        parameters.add(tokenEmbedding);
+        parameters.add(positionEmbedding);
+        parameters.add(finalNorm);
+        parameters.add(output);
+        for (int layer = 0; layer < config.nLayers(); layer++) {
+            int base = TransformerBlock.weightOffset(layer);
+            parameters.add(layerWeights[base]);     // attn_norm
+            parameters.add(layerWeights[base + 1]); // q
+            parameters.add(layerWeights[base + 2]); // k
+            parameters.add(layerWeights[base + 3]); // v
+            parameters.add(layerWeights[base + 4]); // o
+            parameters.add(layerWeights[base + 5]); // ffn_norm
+            parameters.add(layerWeights[base + 6]); // ffn_in
+            parameters.add(layerWeights[base + 7]); // ffn_out
+        }
+        return parameters;
+    }
+
+    public double trainWindow(int[] input, int[] target, int start) {
+        return trainWindow(input, target, start, 0);
+    }
+
+    /** Trains on target tokens at or after firstTargetIndex. */
+    public double trainWindow(int[] input, int[] target, int start, int firstTargetIndex) {
+        return runWindow(input, target, start, true, firstTargetIndex);
+    }
+
+    public double evaluateWindow(int[] input, int[] target, int start) {
+        return evaluateWindow(input, target, start, 0);
+    }
+
+    public double evaluateWindow(int[] input, int[] target, int start, int firstTargetIndex) {
+        return runWindow(input, target, start, false, firstTargetIndex);
+    }
+
+    private double runWindow(int[] input, int[] target, int start, boolean train, int firstTargetIndex) {
+        if (input.length == 0 || input.length != target.length || input.length > config.maxSeqLen()) {
+            throw new IllegalArgumentException("invalid window");
+        }
+        if (start < 0) throw new IllegalArgumentException("window start must be nonnegative");
+        for (int token : input) {
+            if (token < 0 || token >= config.vocabSize()) throw new IllegalArgumentException("input token " + token + " outside vocabulary size " + config.vocabSize());
+        }
+        for (int token : target) {
+            if (token < 0 || token >= config.vocabSize()) throw new IllegalArgumentException("target token outside vocabulary");
+        }
+        int n = input.length;
+        if (firstTargetIndex < 0 || firstTargetIndex >= n) {
+            throw new IllegalArgumentException("first target index outside window");
+        }
+        int supervisedTokens = n - firstTargetIndex;
+        int d = config.dModel();
+        int v = config.vocabSize();
+
+        double[][] x = new double[n][d];
+        for (int p = 0; p < n; p++) {
+            int position = p;
+            for (int i = 0; i < d; i++) {
+                x[p][i] = tokenEmbedding.get(input[p] * d + i) + positionEmbedding.get(position * d + i);
+            }
+        }
+
+        LayerCache[] layers = new LayerCache[config.nLayers()];
+        for (int layer = 0; layer < config.nLayers(); layer++) {
+            int base = TransformerBlock.weightOffset(layer);
+            double[][] residualIn = copyRows(x);
+            double[][] attnNormed = new double[n][d];
+            for (int p = 0; p < n; p++) {
+                attnNormed[p] = rms(x[p], layerWeights[base]);
+            }
+            MultiHeadAttention attention = new MultiHeadAttention(
+                    d,
+                    config.nHeads(),
+                    layerWeights[base + 1].values(),
+                    layerWeights[base + 2].values(),
+                    layerWeights[base + 3].values(),
+                    layerWeights[base + 4].values());
+            MultiHeadAttention.Cache attnCache = attention.forward(attnNormed, train ? DROPOUT_RATE : 0.0, dropoutRandom);
+            double[][] afterAttn = new double[n][d];
+            for (int p = 0; p < n; p++) {
+                for (int i = 0; i < d; i++) {
+                    afterAttn[p][i] = residualIn[p][i] + attnCache.output()[p][i];
+                }
+            }
+            double[][] ffnNormed = new double[n][d];
+            for (int p = 0; p < n; p++) {
+                ffnNormed[p] = rms(afterAttn[p], layerWeights[base + 5]);
+            }
+            FeedForward ffn = new FeedForward(
+                    d,
+                    config.dFfn(),
+                    layerWeights[base + 6].values(),
+                    layerWeights[base + 7].values());
+            FeedForward.Cache ffnCache = ffn.forward(ffnNormed, train ? DROPOUT_RATE : 0.0, dropoutRandom);
+            double[][] next = new double[n][d];
+            for (int p = 0; p < n; p++) {
+                for (int i = 0; i < d; i++) {
+                    next[p][i] = afterAttn[p][i] + ffnCache.output()[p][i];
+                }
+            }
+            layers[layer] = new LayerCache(residualIn, attnCache, afterAttn, ffnCache);
+            x = next;
+        }
+
+        double loss = 0.0;
+        double[][] gradX = new double[n][d];
+        for (int p = 0; p < n; p++) {
+            double[] normalized = rms(x[p], finalNorm);
+            double[] probabilities = Ops.softmax(row(normalized, output, d, v));
+            boolean supervised = p >= firstTargetIndex;
+            if (supervised) loss -= Math.log(Math.max(probabilities[target[p]], 1e-12));
+            if (train && supervised) {
+                probabilities[target[p]] -= 1.0;
+                double[] gradNorm = new double[d];
+                for (int i = 0; i < d; i++) {
+                    for (int j = 0; j < v; j++) {
+                        double gradient = probabilities[j] / supervisedTokens;
+                        output.gradient()[i * v + j] += normalized[i] * gradient;
+                        gradNorm[i] += output.get(i * v + j) * gradient;
+                    }
+                }
+                gradX[p] = rmsBack(gradNorm, x[p], finalNorm);
+            }
+        }
+        if (!train) {
+            return loss / supervisedTokens;
+        }
+
+        for (int layer = config.nLayers() - 1; layer >= 0; layer--) {
+            int base = TransformerBlock.weightOffset(layer);
+            LayerCache cache = layers[layer];
+
+            FeedForward ffn = new FeedForward(
+                    d,
+                    config.dFfn(),
+                    layerWeights[base + 6].values(),
+                    layerWeights[base + 7].values());
+            FeedForward.Gradients ffnGrad = ffn.backward(cache.ffn(), gradX);
+            add(layerWeights[base + 6].gradient(), ffnGrad.inWeight());
+            add(layerWeights[base + 7].gradient(), ffnGrad.outWeight());
+
+            double[][] gradAfterAttn = new double[n][d];
+            for (int p = 0; p < n; p++) {
+                double[] fromFfn = rmsBack(ffnGrad.input()[p], cache.afterAttn()[p], layerWeights[base + 5]);
+                for (int i = 0; i < d; i++) {
+                    gradAfterAttn[p][i] = gradX[p][i] + fromFfn[i];
+                }
+            }
+
+            MultiHeadAttention attention = new MultiHeadAttention(
+                    d,
+                    config.nHeads(),
+                    layerWeights[base + 1].values(),
+                    layerWeights[base + 2].values(),
+                    layerWeights[base + 3].values(),
+                    layerWeights[base + 4].values());
+            MultiHeadAttention.Gradients attnGrad = attention.backward(cache.attention(), gradAfterAttn);
+            add(layerWeights[base + 1].gradient(), attnGrad.q());
+            add(layerWeights[base + 2].gradient(), attnGrad.k());
+            add(layerWeights[base + 3].gradient(), attnGrad.v());
+            add(layerWeights[base + 4].gradient(), attnGrad.o());
+
+            double[][] nextGrad = new double[n][d];
+            for (int p = 0; p < n; p++) {
+                double[] fromAttn = rmsBack(attnGrad.input()[p], cache.residualIn()[p], layerWeights[base]);
+                for (int i = 0; i < d; i++) {
+                    nextGrad[p][i] = gradAfterAttn[p][i] + fromAttn[i];
+                }
+            }
+            gradX = nextGrad;
+        }
+
+        for (int p = 0; p < n; p++) {
+            int position = p;
+            for (int i = 0; i < d; i++) {
+                tokenEmbedding.gradient()[input[p] * d + i] += gradX[p][i];
+                positionEmbedding.gradient()[position * d + i] += gradX[p][i];
+            }
+        }
+        return loss / supervisedTokens;
+    }
+
+    private double[] rms(double[] x, Tensor scale) {
+        double sumSquares = 0.0;
+        for (double value : x) {
+            sumSquares += value * value;
+        }
+        double inv = 1.0 / Math.sqrt(sumSquares / x.length + config.rmsNormEpsilon());
+        double[] y = new double[x.length];
+        for (int i = 0; i < x.length; i++) {
+            y[i] = x[i] * inv * scale.get(i);
+        }
+        return y;
+    }
+
+    private double[] rmsBack(double[] grad, double[] x, Tensor scale) {
+        double sumSquares = 0.0;
+        double dot = 0.0;
+        for (int i = 0; i < x.length; i++) {
+            sumSquares += x[i] * x[i];
+            dot += grad[i] * scale.get(i) * x[i];
+        }
+        double inv = 1.0 / Math.sqrt(sumSquares / x.length + config.rmsNormEpsilon());
+        double[] dx = new double[x.length];
+        for (int i = 0; i < x.length; i++) {
+            scale.gradient()[i] += x[i] * inv * grad[i];
+            dx[i] = inv * grad[i] * scale.get(i) - x[i] * dot * inv * inv * inv / x.length;
+        }
+        return dx;
+    }
+
+    private static double[] row(double[] x, Tensor matrix, int rows, int cols) {
+        double[] y = new double[cols];
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                y[j] += x[i] * matrix.get(i * cols + j);
+            }
+        }
+        return y;
+    }
+
+    private static void add(double[] target, double[] source) {
+        for (int i = 0; i < target.length; i++) {
+            target[i] += source[i];
+        }
+    }
+
+    private static double[][] copyRows(double[][] source) {
+        double[][] copy = new double[source.length][];
+        for (int i = 0; i < source.length; i++) {
+            copy[i] = source[i].clone();
+        }
+        return copy;
+    }
+
+    private record LayerCache(
+            double[][] residualIn,
+            MultiHeadAttention.Cache attention,
+            double[][] afterAttn,
+            FeedForward.Cache ffn) {}
 }
