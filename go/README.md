@@ -2,30 +2,47 @@
 
 Repository owner: [nkosikhumalo](https://github.com/nkosikhumalo).
 
-This directory provides the Go half of MicroLLM's pipeline:
+This directory is the Go half of MicroLLM:
 
-- `cmd/tokenize`: builds a deterministic UTF-8 character vocabulary and writes `vocab.json` plus `tokens.json` for Java training.
-- `cmd/generate`: loads an exported model, samples next tokens, and writes them immediately to standard output.
-- `internal/tokenizer`: stable vocabulary construction, UTF-8 encode/decode, and vocabulary persistence.
-- `internal/loader`: validates the model hand-off file before inference.
-- `internal/inference`: a causal, pre-RMSNorm Transformer forward pass (multi-head attention, GELU FFN, residuals, and output logits).
-- `internal/sampler`: temperature, top-k, top-p, and greedy decoding.
-- `internal/cli`: small prompt and streaming helpers.
+| Path | Role |
+|------|------|
+| `cmd/tokenize` | Build a greedy wordpiece vocabulary + `tokens.json` from `data/raw/train.txt` by default |
+| `cmd/generate` | One-shot generation with **KV-cache** session |
+| `cmd/chat` | Multi-turn terminal chat (Human/Bot prefixes) |
+| `internal/tokenizer` | Encode / decode / save / load vocab |
+| `internal/loader` | Validate and load Java `model.json` |
+| `internal/inference` | Full `Logits` + incremental `Session` (KV-cache) |
+| `internal/sampler` | Temperature, top-k, top-p, greedy |
+| `internal/cli` | Prompt + streaming helpers |
 
 ## Run
 
-Run commands from this directory so their default paths resolve to the repository's `data` and `models` folders:
+From this directory (or use `../scripts/*.sh` from the repo root):
 
 ```bash
-go run ./cmd/tokenize -input ../data/raw -output ../data/tokenized
-go run ./cmd/generate -model ../models/exported/model.json -vocab ../data/tokenized/vocab.json -prompt "Hello" -tokens 100
+go test ./...
+
+go run ./cmd/tokenize -input ../data/raw/train.txt -output ../data/tokenized
+
+go run ./cmd/generate \
+  -model ../models/exported/model.json \
+  -vocab ../data/tokenized/vocab.json \
+  -prompt "hello " -tokens 64
+
+go run ./cmd/chat \
+  -model ../models/exported/model.json \
+  -vocab ../data/tokenized/vocab.json
 ```
 
-Use `go test ./...` to compile and check every package.
+Root helpers: `scripts/tokenize.sh`, `scripts/generate.sh`, `scripts/chat.sh`.
+
+## KV-cache
+
+`Model.NewSession()` keeps per-layer Key/Value rows. `Prefill(ids)` warms the cache; each `Step(id)` only runs the new position. `Logits(ids)` still recomputes the full sequence (used in tests to prove cache matches).
 
 ## Java-to-Go model contract
 
-`cmd/generate` expects `models/exported/model.json`. Java's `WeightExporter` must produce this versioned JSON envelope:
+`cmd/generate` / `cmd/chat` expect `models/exported/model.json`. Required envelope:
 
 ```json
 {
@@ -40,25 +57,22 @@ Use `go test ./...` to compile and check every package.
     "max_seq_len": 128,
     "rms_norm_epsilon": 0.00001
   },
-  "weights": {
-    "token_embedding": [],
-    "position_embedding": [],
-    "layers": [{"attn_norm": [], "q": [], "k": [], "v": [], "o": [], "ffn_norm": [], "ffn_in": [], "ffn_out": []}],
-    "final_norm": [],
-    "output": []
-  }
+  "weights": { "...": "row-major float arrays" }
 }
 ```
 
-All matrices are flattened row-major: input dimension first, output dimension second. Required sizes are validated on load:
+Train and generate with the **same** `vocab.json`.
 
-- embeddings: `vocab_size × d_model` and `max_seq_len × d_model`
-- Q/K/V/O: `d_model × d_model`
-- FFN input/output: `d_model × d_ffn` and `d_ffn × d_model`
-- output head: `d_model × vocab_size`
+## Tests
 
-The vocabulary's token order is part of the model contract: train and generate with the same `vocab.json`.
+```bash
+go test ./...
+```
 
-## Current boundary
+Covers tokenizer round-trip, loader validation, sampler greedy/top-k, and KV-cache vs full forward equality.
 
-Java now exports a deterministic initialized `model.json` that Go loads successfully. The Java training stack is still scaffolded, so its generated text is not meaningful until the Java Transformer and training loop write trained weights using the same export contract. See [`../java/README.md`](../java/README.md).
+## Notes
+
+- The default input is `data/raw/train.txt`; pass a `.txt` directory to tokenize multiple files. JSON corpora must be converted first.
+- Chat quality depends on the training corpus using the same `Human:` / `Bot:` style you use at inference time.
+- See [`../STATUS.md`](../STATUS.md) for the full project status.
