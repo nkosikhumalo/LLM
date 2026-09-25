@@ -11,7 +11,7 @@ The Java directory owns model configuration and model export. It writes the sing
 - `train/TrainMain.java`: reads Go's `vocab.json`, trains a correctly sized model from Go's `tokens.json` and exports `model.json`.
 - `pom.xml`: Java 21 Maven build, tests, and an executable JAR manifest.
 
-The first training milestone is implemented: token and positional embeddings plus the output head train with cross-entropy and AdamW. Causal-attention Q/K/V/O projections now train over full windows with a strict future-token mask. FFN is temporarily exported as a zero residual while its sequence backpropagation is integrated.
+Training includes token/position embeddings, causal-attention Q/K/V/O (future-token mask), GELU FFN (`ffn_in` / `ffn_out`), RMSNorm scales, and the output head — all updated with AdamW. The trainer shuffles causal windows each epoch, can hold out a validation tail (`--val-fraction`), and early-stops on `--patience`.
 
 ## Shared contract with Go
 
@@ -41,9 +41,9 @@ Go creates `../data/tokenized/vocab.json`; Java counts its tokens and uses that 
 From the repository root:
 
 ```bash
-# 1. Put one or more .txt files in data/raw, then tokenize them with Go.
+# 1. Tokenize the active Human/Bot corpus with Go.
 cd go
-go run ./cmd/tokenize -input ../data/raw -output ../data/tokenized
+go run ./cmd/tokenize -input ../data/raw/train.txt -output ../data/tokenized
 
 # 2. Compile Java, train, and export a compatible model.
 cd ../java
@@ -52,7 +52,8 @@ java -cp target/classes com.microllm.train.TrainMain \
   --vocab ../data/tokenized/vocab.json \
   --tokens ../data/tokenized/tokens.json \
   --output ../models/exported/model.json \
-  --epochs 1000
+  --epochs 1000 --learning-rate 0.001 \
+  --val-fraction 0.1 --patience 50
 
 # 3. Load the Java export and generate with Go.
 cd ../go
@@ -64,7 +65,7 @@ go run ./cmd/generate \
 
 ## Verified integration
 
-On 2026-09-22 the included `data/raw/integration-example.txt` was used for an end-to-end check:
+The current training corpus is `data/raw/train.txt`; each dialogue ends with `<|end|>`. Answer anchors are optional and disabled by default.
 
 | Stage | Result |
 | --- | --- |
@@ -75,4 +76,7 @@ On 2026-09-22 the included `data/raw/integration-example.txt` was used for an en
 
 ## Next Java work
 
-Add gradients for the attention, FFN, and RMSNorm weights; the JSON fields, row-major order, and dimensions must remain unchanged so Go stays compatible.
+- Optional multi-layer preset + integration test (`n_layers = 2`).
+- Broader finite-difference gradient checks (attention, RMSNorm).
+- Checkpoints and `model.metadata.json`.
+- Keep the JSON field names, row-major order, and shapes unchanged so Go stays compatible.
