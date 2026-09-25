@@ -1,11 +1,8 @@
 package com.microllm.layers;
 
-/**
- * Belongs here: Softmax over attention scores or logits (shared helper).
- *
- * Intended contents:
- * - Numerically stable Softmax along a chosen axis
- * - Used inside MultiHeadAttention (and optionally loss)
- */
+import com.microllm.tensor.Ops;
+
+/** Stable softmax over a single vector of logits. */
 public final class Softmax {
+    public double[] forward(double[] logits) { return Ops.softmax(logits); }
 }
