@@ -52,27 +52,82 @@ public final class WeightExporter {
         appendArray(json, "final_norm", ones(config.dModel()), true);
         appendArray(json, "output", randomNormalArray(random, config.dModel() * config.vocabSize(), 0.02), false);
         json.append("\n  }\n}\n");
-        Files.createDirectories(outputPath.toAbsolutePath().getParent());
-        Files.writeString(outputPath, json, StandardCharsets.UTF_8);
+        write(outputPath, json);
     }
 
     public static void writeModel(Path outputPath, Transformer model) throws IOException {
-        ModelConfig config = model.config(); StringBuilder json = new StringBuilder(64000);
-        json.append("{\n  \"format\": \"microllm\",\n  \"version\": 1,\n  \"config\": {").append("\n    \"vocab_size\": ").append(config.vocabSize()).append(",\n    \"d_model\": ").append(config.dModel()).append(",\n    \"n_layers\": ").append(config.nLayers()).append(",\n    \"n_heads\": ").append(config.nHeads()).append(",\n    \"d_ffn\": ").append(config.dFfn()).append(",\n    \"max_seq_len\": ").append(config.maxSeqLen()).append(",\n    \"rms_norm_epsilon\": ").append(number(config.rmsNormEpsilon())).append("\n  },\n  \"weights\": {");
-        appendArray(json,"token_embedding",model.tokenEmbedding().values(),true); appendArray(json,"position_embedding",model.positionEmbedding().values(),true); json.append("\n    \"layers\": [");
-        for(int l=0;l<config.nLayers();l++){int b=l*8;if(l>0)json.append(',');json.append("\n      {");appendArray(json,"attn_norm",model.layerWeight(b).values(),true,8);appendArray(json,"q",model.layerWeight(b+1).values(),true,8);appendArray(json,"k",model.layerWeight(b+2).values(),true,8);appendArray(json,"v",model.layerWeight(b+3).values(),true,8);appendArray(json,"o",model.layerWeight(b+4).values(),true,8);appendArray(json,"ffn_norm",model.layerWeight(b+5).values(),true,8);appendArray(json,"ffn_in",model.layerWeight(b+6).values(),true,8);appendArray(json,"ffn_out",model.layerWeight(b+7).values(),false,8);json.append("\n      }");}json.append("\n    ],");appendArray(json,"final_norm",model.finalNorm().values(),true);appendArray(json,"output",model.output().values(),false);json.append("\n  }\n}\n");Files.createDirectories(outputPath.toAbsolutePath().getParent());Files.writeString(outputPath,json,StandardCharsets.UTF_8);}
+        ModelConfig config = model.config();
+        StringBuilder json = new StringBuilder(64_000);
+        appendHeader(json, config);
+        appendArray(json, "token_embedding", model.tokenEmbedding().values(), true);
+        appendArray(json, "position_embedding", model.positionEmbedding().values(), true);
+        json.append("\n    \"layers\": [");
+        for (int layer = 0; layer < config.nLayers(); layer++) {
+            int base = layer * 8;
+            if (layer > 0) json.append(',');
+            json.append("\n      {");
+            appendArray(json, "attn_norm", model.layerWeight(base).values(), true, 8);
+            appendArray(json, "q", model.layerWeight(base + 1).values(), true, 8);
+            appendArray(json, "k", model.layerWeight(base + 2).values(), true, 8);
+            appendArray(json, "v", model.layerWeight(base + 3).values(), true, 8);
+            appendArray(json, "o", model.layerWeight(base + 4).values(), true, 8);
+            appendArray(json, "ffn_norm", model.layerWeight(base + 5).values(), true, 8);
+            appendArray(json, "ffn_in", model.layerWeight(base + 6).values(), true, 8);
+            appendArray(json, "ffn_out", model.layerWeight(base + 7).values(), false, 8);
+            json.append("\n      }");
+        }
+        json.append("\n    ],");
+        appendArray(json, "final_norm", model.finalNorm().values(), true);
+        appendArray(json, "output", model.output().values(), false);
+        json.append("\n  }\n}\n");
+        write(outputPath, json);
+    }
+
+    private static void appendHeader(StringBuilder json, ModelConfig config) {
+        json.append("{\n  \"format\": \"microllm\",\n  \"version\": 1,\n  \"config\": {")
+                .append("\n    \"vocab_size\": ").append(config.vocabSize()).append(',')
+                .append("\n    \"d_model\": ").append(config.dModel()).append(',')
+                .append("\n    \"n_layers\": ").append(config.nLayers()).append(',')
+                .append("\n    \"n_heads\": ").append(config.nHeads()).append(',')
+                .append("\n    \"d_ffn\": ").append(config.dFfn()).append(',')
+                .append("\n    \"max_seq_len\": ").append(config.maxSeqLen()).append(',')
+                .append("\n    \"rms_norm_epsilon\": ").append(number(config.rmsNormEpsilon()))
+                .append("\n  },\n  \"weights\": {");
+    }
+
+    private static void write(Path outputPath, StringBuilder json) throws IOException {
+        Path parent = outputPath.toAbsolutePath().getParent();
+        if (parent != null) Files.createDirectories(parent);
+        Files.writeString(outputPath, json, StandardCharsets.UTF_8);
+    }
 
     private static double[] randomNormalArray(Random random, int size, double standardDeviation) {
         double[] values = new double[size];
         for (int index = 0; index < size; index++) values[index] = random.nextGaussian() * standardDeviation;
         return values;
     }
-    private static double[] ones(int size) { double[] values = new double[size]; java.util.Arrays.fill(values, 1); return values; }
-    private static void appendArray(StringBuilder json, String name, double[] values, boolean trailingComma) { appendArray(json, name, values, trailingComma, 4); }
+
+    private static double[] ones(int size) {
+        double[] values = new double[size];
+        java.util.Arrays.fill(values, 1.0);
+        return values;
+    }
+
+    private static void appendArray(StringBuilder json, String name, double[] values, boolean trailingComma) {
+        appendArray(json, name, values, trailingComma, 4);
+    }
+
     private static void appendArray(StringBuilder json, String name, double[] values, boolean trailingComma, int indent) {
         json.append("\n").append(" ".repeat(indent)).append('"').append(name).append("\": [");
-        for (int index = 0; index < values.length; index++) { if (index > 0) json.append(','); json.append(number(values[index])); }
-        json.append(']'); if (trailingComma) json.append(',');
+        for (int index = 0; index < values.length; index++) {
+            if (index > 0) json.append(',');
+            json.append(number(values[index]));
+        }
+        json.append(']');
+        if (trailingComma) json.append(',');
     }
-    private static String number(double value) { return String.format(Locale.ROOT, "%.9g", value); }
+
+    private static String number(double value) {
+        return String.format(Locale.ROOT, "%.9g", value);
+    }
 }
