@@ -17,9 +17,12 @@ public record ModelConfig(
         if (dModel % nHeads != 0) {
             throw new IllegalArgumentException("dModel must divide evenly across nHeads");
         }
+        if (rmsNormEpsilon <= 0.0 || !Double.isFinite(rmsNormEpsilon)) {
+            throw new IllegalArgumentException("rmsNormEpsilon must be finite and positive");
+        }
     }
 
     public static ModelConfig small(int vocabSize) {
-        return new ModelConfig(vocabSize, 16, 1, 2, 32, 64, 1e-5);
+        return new ModelConfig(vocabSize, 32, 2, 4, 64, 128, 1e-5);
     }
 }
