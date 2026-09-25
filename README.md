@@ -268,7 +268,7 @@ micro-llm/
 ## Running it
 
 ```bash
-# step 1 — put your text in data/raw/ then tokenize it
+# step 1 — tokenize the active corpus in data/raw/train.txt
 bash scripts/tokenize.sh
 
 # step 2 — train the model (Java)
