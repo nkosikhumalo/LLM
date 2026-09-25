@@ -3,15 +3,16 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math/rand"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/nkosikhumalo/microllm/internal/cli"
 	"github.com/nkosikhumalo/microllm/internal/inference"
 	"github.com/nkosikhumalo/microllm/internal/loader"
 	"github.com/nkosikhumalo/microllm/internal/sampler"
 	"github.com/nkosikhumalo/microllm/internal/tokenizer"
-	"math/rand"
-	"os"
-	"strings"
-	"time"
 )
 
 func main() {
@@ -19,59 +20,104 @@ func main() {
 	vocabPath := flag.String("vocab", "../data/tokenized/vocab.json", "vocabulary JSON")
 	prompt := flag.String("prompt", "", "initial text")
 	n := flag.Int("tokens", 100, "tokens to generate")
-	temp := flag.Float64("temperature", 1, "sampling temperature")
-	topK := flag.Int("top-k", 0, "top-k (0 disables)")
+	temp := flag.Float64("temperature", 0.7, "sampling temperature")
+	topKValue := 40
+	flag.IntVar(&topKValue, "top-k", 40, "top-k (0 disables)")
+	flag.IntVar(&topKValue, "topk", 40, "alias for -top-k")
 	topP := flag.Float64("top-p", 1, "nucleus probability")
 	greedy := flag.Bool("greedy", false, "choose most likely token")
+	repetitionPenalty := flag.Float64("repetition-penalty", 1.15, "penalty for repeating tokens; 1 disables")
 	seed := flag.Int64("seed", time.Now().UnixNano(), "random seed")
 	flag.Parse()
-	e, v := loader.Load(*modelPath)
-	if v != nil {
-		fatal("load model: %v", v)
+
+	modelExport, err := loader.Load(*modelPath)
+	if err != nil {
+		fatal("load model: %v", err)
 	}
-	voc, v := tokenizer.Load(*vocabPath)
-	if v != nil {
-		fatal("load vocab: %v", v)
+	vocab, err := tokenizer.Load(*vocabPath)
+	if err != nil {
+		fatal("load vocab: %v", err)
 	}
-	if len(voc.Tokens) != e.Config.VocabSize {
+	if len(vocab.Tokens) != modelExport.Config.VocabSize {
 		fatal("vocabulary size does not match model")
 	}
-	m, v := inference.New(e)
-	if v != nil {
-		fatal("model: %v", v)
+	model, err := inference.New(modelExport)
+	if err != nil {
+		fatal("model: %v", err)
 	}
-	p, v := cli.Prompt(strings.TrimSpace(*prompt))
-	if v != nil {
-		fatal("prompt: %v", v)
+	promptText, err := cli.Prompt(strings.TrimSpace(*prompt))
+	if err != nil {
+		fatal("prompt: %v", err)
 	}
-	ids, v := voc.Encode(strings.TrimSpace(p))
-	if v != nil {
-		fatal("encode prompt: %v", v)
+	promptText = strings.TrimSpace(promptText)
+	if strings.HasSuffix(promptText, " | Bot:") {
+		promptText += " " // match the separator used in train.txt
 	}
-	fmt.Print(p)
-	cfg := sampler.Config{Temperature: *temp, TopK: *topK, TopP: *topP, Greedy: *greedy}
+	ids, err := vocab.Encode(promptText)
+	if err != nil {
+		fatal("encode prompt: %v", err)
+	}
+
+	session := model.NewSession()
+	cfg := sampler.Config{Temperature: *temp, TopK: topKValue, TopP: *topP, Greedy: *greedy, RepetitionPenalty: *repetitionPenalty}
 	rng := rand.New(rand.NewSource(*seed))
+
+	var logits []float64
+	if len(ids) > 0 {
+		logits, err = session.Prefill(ids)
+		if err != nil {
+			fatal("prefill: %v", err)
+		}
+	}
+
+	var generated strings.Builder
+	generatedIDs := make([]int, 0, *n)
 	for i := 0; i < *n; i++ {
-		if len(ids) >= e.Config.MaxSeqLen {
-			ids = ids[1:]
+		if session.Len() >= modelExport.Config.MaxSeqLen {
+			keep := ids
+			if len(keep) >= modelExport.Config.MaxSeqLen {
+				keep = keep[len(keep)-modelExport.Config.MaxSeqLen+1:]
+			}
+			logits, err = session.Prefill(keep)
+			if err != nil {
+				fatal("re-prefill: %v", err)
+			}
+			ids = append([]int(nil), keep...)
 		}
-		logits, v := m.Logits(ids)
-		if v != nil {
-			fatal("inference: %v", v)
+		if logits == nil {
+			fatal("prompt is empty")
 		}
-		id, v := sampler.Sample(logits, cfg, rng)
-		if v != nil {
-			fatal("sample: %v", v)
+		cfg.SeenTokens = generatedIDs
+		id, err := sampler.Sample(logits, cfg, rng)
+		if err != nil {
+			fatal("sample: %v", err)
 		}
-		text, v := voc.Decode([]int{id})
-		if v != nil {
-			fatal("decode: %v", v)
+		text, err := vocab.Decode([]int{id})
+		if err != nil {
+			fatal("decode: %v", err)
 		}
-		if v = cli.Stream(os.Stdout, text); v != nil {
-			fatal("write: %v", v)
+		generated.WriteString(text)
+		generatedIDs = append(generatedIDs, id)
+		if strings.Contains(generated.String(), "<|end|>") {
+			break
 		}
 		ids = append(ids, id)
+		logits, err = session.Step(id)
+		if err != nil {
+			fatal("step: %v", err)
+		}
 	}
-	fmt.Println()
+	response := generated.String()
+	if end := strings.Index(response, "<|end|>"); end >= 0 {
+		response = response[:end]
+	}
+	if end := strings.IndexAny(response, "\r\n"); end >= 0 {
+		response = response[:end]
+	}
+	fmt.Println(promptText + response)
 }
-func fatal(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...); os.Exit(1) }
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
