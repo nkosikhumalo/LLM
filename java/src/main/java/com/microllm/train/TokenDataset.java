@@ -71,36 +71,6 @@ public final class TokenDataset {
         return tokens.length;
     }
 
-    /** Loads reply windows produced by the Go tokenizer. */
-    public static List<AnswerAnchor> loadAnswerAnchors(Path path) throws IOException {
-        List<AnswerAnchor> anchors = new ArrayList<>();
-        try (var lines = Files.lines(path)) {
-            lines.forEach(line -> {
-                String[] fields = line.trim().split("\\t");
-                if (fields.length != 2 && fields.length != 3) {
-                    throw new IllegalArgumentException("expected window, answer, and optional end offsets");
-                }
-                try {
-                    int windowStart = Integer.parseInt(fields[0]);
-                    int answerStart = Integer.parseInt(fields[1]);
-                    int targetLength = fields.length == 3
-                            ? Integer.parseInt(fields[2]) - windowStart - 1
-                            : 128;
-                    int firstTargetIndex = answerStart - windowStart - 1;
-                    if (windowStart < 0 || firstTargetIndex < 0 || targetLength <= firstTargetIndex) {
-                        throw new IllegalArgumentException("answer anchor offsets are invalid");
-                    }
-                    anchors.add(new AnswerAnchor(windowStart, firstTargetIndex, targetLength));
-                } catch (NumberFormatException exception) {
-                    throw new IllegalArgumentException("invalid answer anchor: " + line, exception);
-                }
-            });
-        } catch (IllegalArgumentException exception) {
-            throw new IOException("invalid answer anchor file", exception);
-        }
-        return anchors;
-    }
-
     public int inputAt(int index) {
         return tokens[index];
     }
@@ -171,9 +141,6 @@ public final class TokenDataset {
     }
 
     public record Window(int[] input, int[] target) {}
-
-    /** firstTargetIndex identifies the first answer token to supervise in a window. */
-    public record AnswerAnchor(int windowStart, int firstTargetIndex, int targetLength) { }
 
     public record Split(TokenDataset train, TokenDataset validation) {}
 }
