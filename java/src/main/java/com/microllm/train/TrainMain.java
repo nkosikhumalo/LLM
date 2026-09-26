@@ -1,5 +1,6 @@
 package com.microllm.train;
 
+import com.microllm.export.CheckpointImporter;
 import com.microllm.export.WeightExporter;
 import com.microllm.model.ModelConfig;
 import com.microllm.model.Transformer;
@@ -17,27 +18,34 @@ public final class TrainMain {
         Path vocabPath = Path.of(arg(args, "--vocab", "../data/tokenized/vocab.json"));
         Path tokensPath = Path.of(arg(args, "--tokens", "../data/tokenized/tokens.json"));
         Path outputPath = Path.of(arg(args, "--output", "../models/exported/model.json"));
-        String anchorsArgument = arg(args, "--answer-anchors", "../data/processed/train_answer_anchors.offsets");
-        Path anchorsPath = anchorsArgument.isBlank() ? null : Path.of(anchorsArgument);
         double learningRate = Double.parseDouble(arg(args, "--learning-rate", "0.0003"));
         int epochs = Integer.parseInt(arg(args, "--epochs", "1000"));
         double validationFraction = Double.parseDouble(arg(args, "--val-fraction", "0.1"));
         int patience = Integer.parseInt(arg(args, "--patience", "50"));
         int windowsPerEpoch = Integer.parseInt(arg(args, "--windows-per-epoch", "0"));
+        String initialWeightsArgument = arg(args, "--init-weights", "");
+        boolean fakeQuantization = Boolean.parseBoolean(arg(args, "--fake-quantization", "false"));
 
         int vocabSize = readVocabularySize(vocabPath);
         if (vocabSize == 0) throw new IOException("vocabulary must contain at least one token");
 
-        Transformer model = new Transformer(ModelConfig.small(vocabSize), 42);
+        Transformer model;
+        if (!initialWeightsArgument.isBlank()) {
+            CheckpointImporter.LoadedCheckpoint initial = CheckpointImporter.read(Path.of(initialWeightsArgument));
+            if (initial.config().vocabSize() != vocabSize) throw new IOException("initial checkpoint vocabulary does not match vocab.json");
+            model = new Transformer(initial.config(), 42);
+            model.loadParameters(initial.tensors());
+        } else {
+            if (fakeQuantization) throw new IOException("fake quantization requires --init-weights");
+            model = new Transformer(ModelConfig.small(vocabSize), 42);
+        }
+        model.setFakeQuantization(fakeQuantization);
         TokenDataset dataset = TokenDataset.load(tokensPath);
         TokenDataset.Split split = dataset.split(validationFraction);
-        var answerAnchors = anchorsPath != null && Files.exists(anchorsPath)
-                ? TokenDataset.loadAnswerAnchors(anchorsPath)
-                : java.util.List.<TokenDataset.AnswerAnchor>of();
         double loss = new Trainer(model, split, learningRate, patience, 42L,
-                windowsPerEpoch, answerAnchors).train(epochs);
+                windowsPerEpoch).train(epochs);
         WeightExporter.writeModel(outputPath, model);
-        System.out.printf("Wrote trained Go-compatible model: %s (loss %.4f)%n", outputPath, loss);
+        System.out.printf("Wrote %s Go-compatible model: %s (loss %.4f)%n", fakeQuantization ? "QAT fine-tuned" : "trained", outputPath, loss);
     }
 
     private static int readVocabularySize(Path path) throws IOException {
