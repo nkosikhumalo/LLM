@@ -1,306 +1,85 @@
-<p align="center">
-  <img src="image/title-banner.svg" alt="MicroLLM — Go prepares and serves, Java trains and exports" width="880"/>
-</p>
+# MiniLLM + Quantization Engine
 
-<p align="center">
-  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&amp;logo=go&amp;logoColor=white" alt="Go"/></a>
-  <a href="https://www.java.com/"><img src="https://img.shields.io/badge/Java-E76F00?style=for-the-badge&amp;logo=openjdk&amp;logoColor=white" alt="Java"/></a>
-  <img src="https://img.shields.io/badge/from%20scratch-1e293b?style=for-the-badge" alt="From scratch"/>
-  <img src="https://img.shields.io/badge/no%20Python-334155?style=for-the-badge" alt="No Python"/>
-</p>
+One local system for training a small Transformer, compressing its checkpoints, and measuring the quality/size tradeoff. It has two quantization paths: post-training quantization (PTQ) and quantization-aware training (QAT).
 
-<p align="center">
-  A language model built from scratch — no Python, no cloud, no magic boxes.<br/>
-  Just <strong>Go</strong> and <strong>Java</strong> doing everything from raw text to generated output.
-</p>
+## System flow
 
-<p align="center">
-  <img src="image/architecture.jpeg" alt="Micro-LLM architecture: Go prepares text, Java trains the model, Go writes answers" width="900"/>
-</p>
-
----
-
-<p align="center">
-  <img src="image/tagline.svg" alt="Two languages. One pipeline. Zero magic." width="880"/>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Go-tokenize-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go tokenize"/>
-  <img src="https://img.shields.io/badge/Go-load%20weights-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go load weights"/>
-  <img src="https://img.shields.io/badge/Go-inference-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go inference"/>
-  <img src="https://img.shields.io/badge/Go-stream%20output-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go stream"/>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Java-transformer-E76F00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java transformer"/>
-  <img src="https://img.shields.io/badge/Java-backprop-E76F00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java backprop"/>
-  <img src="https://img.shields.io/badge/Java-Adam%20%2F%20SGD-E76F00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java optimizer"/>
-  <img src="https://img.shields.io/badge/Java-export%20weights-E76F00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java export"/>
-</p>
-
----
-
-## What this is
-
-You drop a few megabytes of text in a folder. Java trains a small transformer on it — learning which characters tend to follow which. Then you run Go with any prompt and it streams text back to your terminal, one character at a time.
-
-Every part is written by hand. No ML frameworks, no Python, no GPU required. Training takes minutes on a regular laptop.
-
----
-
-## Colour guide
-
-<p align="center">
-  <img src="image/color-guide.svg" alt="Go blue, Java orange, shared slate" width="880"/>
-</p>
-
-| Side | Colour | Job |
-|------|--------|-----|
-| ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | `#00ADD8` | Tokenize text, load weights, run the model, stream answers |
-| ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | `#E76F00` | Tensor math, transformer layers, backprop, optimizer, weight export |
-| ![Shared](https://img.shields.io/badge/Shared-64748B?style=flat-square) | `#64748B` | Data files and weight files used by both sides |
-
----
-
-## The full pipeline
-
-```mermaid
-flowchart LR
-    A([Raw text]) -->|Go tokenizes| B([Token IDs])
-    B -->|Java trains| C([Weight file])
-    C -->|Go loads| D([Your prompt])
-    D -->|Go generates| E([Output text])
-
-    style A fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style B fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style C fill:#E76F00,color:#ffffff,stroke:#b45309
-    style D fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style E fill:#059669,color:#ffffff,stroke:#047857
+```text
+text corpus → tokenizer → Java causal trainer → FP32 checkpoint
+                                             ├─ PTQ → PTQ INT8 checkpoint
+                                             └─ fake-quant fine-tuning → QAT INT8 checkpoint
+FP32 + PTQ + QAT checkpoints → held-out benchmark → JSON + terminal comparison
 ```
 
----
+The source model is trained in Java. Go validates the shared checkpoint, implements PTQ and dequantization, orchestrates QAT with the Java trainer, and benchmarks all three model variants.
 
-## Phase 1 — Training
+## Quick start
 
-![Go](https://img.shields.io/badge/Go-data%20prep-00ADD8?style=for-the-badge&logo=go&logoColor=white)
-![Java](https://img.shields.io/badge/Java-training-E76F00?style=for-the-badge&logo=openjdk&logoColor=white)
-
-**Go** turns raw text into numbers. **Java** trains the model on those numbers and saves the result.
-
-```mermaid
-flowchart TB
-    subgraph GO ["Go — Data Prep"]
-        A([Raw text files]) --> B([Split into characters])
-        B --> C([Assign ID 0–255 to each char])
-        C --> D([Save as integer sequences])
-    end
-
-    subgraph JV ["Java — Training"]
-        E([Load sequences]) --> F([Embed each token])
-        F --> G([Multi-head attention])
-        G --> H([Feed-forward layer])
-        H --> I([Normalize — RMSNorm])
-        I --> J([Measure loss])
-        J --> K([Backpropagate gradients])
-        K --> L([Update weights — AdamW / SGD])
-        L --> M([Save weight file])
-    end
-
-    D --> E
-
-    style GO fill:#e0f7fc,stroke:#00ADD8,color:#0f172a
-    style JV fill:#fff4e5,stroke:#E76F00,color:#0f172a
-    style A fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style B fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style C fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style D fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style E fill:#E76F00,color:#ffffff,stroke:#b45309
-    style F fill:#E76F00,color:#ffffff,stroke:#b45309
-    style G fill:#E76F00,color:#ffffff,stroke:#b45309
-    style H fill:#E76F00,color:#ffffff,stroke:#b45309
-    style I fill:#E76F00,color:#ffffff,stroke:#b45309
-    style J fill:#E76F00,color:#ffffff,stroke:#b45309
-    style K fill:#E76F00,color:#ffffff,stroke:#b45309
-    style L fill:#E76F00,color:#ffffff,stroke:#b45309
-    style M fill:#c2410c,color:#ffffff,stroke:#9a3412
-```
-
-### What each step means
-
-| Step | Who | Plain meaning |
-|------|-----|---------------|
-| Character split | ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | Break the text into individual letters and symbols |
-| Assign IDs | ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | Give every character a number (0 to 255) |
-| Save sequences | ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | Write those numbers to disk so Java can read them |
-| Embed tokens | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Turn each number into a small list of floats the model can work with |
-| Attention | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Let each character look at surrounding characters to understand context |
-| Feed-forward | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Extra processing step after attention — adds depth |
-| RMSNorm | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Keeps the numbers from getting too big or too small during training |
-| Loss | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Measures how wrong the model's prediction was |
-| Backprop | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Figures out which weights caused the mistake |
-| Optimizer | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Nudges every weight slightly in the right direction |
-| Export | ![Java](https://img.shields.io/badge/Java-E76F00?style=flat-square&logo=openjdk&logoColor=white) | Saves everything the model learned into a file |
-
----
-
-## Phase 2 — Inference
-
-![Go only](https://img.shields.io/badge/Go%20only-inference-00ADD8?style=for-the-badge&logo=go&logoColor=white)
-
-Only **Go** here. No Java, no training loop — just load the weights and generate.
-
-```mermaid
-flowchart TB
-    A([Your prompt]) --> B([Tokenize — chars to IDs])
-    B --> C([Load weight file])
-    C --> D([Forward pass through transformer])
-    D --> E([KV-cache — skip recomputing old tokens])
-    E --> F([Get probabilities for next character])
-    F --> G([Sample with temperature + Top-K + Top-P])
-    G --> H([Write character to terminal])
-    H -->|next character| D
-
-    style A fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style B fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style C fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style D fill:#0891b2,color:#ffffff,stroke:#0e7490
-    style E fill:#0891b2,color:#ffffff,stroke:#0e7490
-    style F fill:#0891b2,color:#ffffff,stroke:#0e7490
-    style G fill:#0891b2,color:#ffffff,stroke:#0e7490
-    style H fill:#059669,color:#ffffff,stroke:#047857
-```
-
-### The sampler — three knobs
-
-| Knob | What it does |
-|------|-------------|
-| Temperature | Low = safe and predictable. High = creative and surprising |
-| Top-K | Only consider the K most likely next characters |
-| Top-P | Only consider characters that together make up P% of the probability mass |
-
-The KV-cache is a speed trick — Go stores the attention results for characters it already processed, so each new character only needs one forward step instead of recomputing everything from scratch.
-
----
-
-## Module breakdown
-
-```mermaid
-flowchart LR
-    subgraph GO ["Go packages"]
-        G1([tokenizer])
-        G2([loader])
-        G3([inference + KV-cache])
-        G4([sampler])
-        G5([cli])
-    end
-
-    subgraph JAVA ["Java packages"]
-        J1([tensor + ops])
-        J2([layers])
-        J3([autograd])
-        J4([optimizer])
-        J5([exporter])
-        J6([trainer])
-    end
-
-    G1 -->|token IDs| J6
-    J5 -->|weight file| G2
-
-    style GO fill:#e0f7fc,stroke:#00ADD8,color:#0f172a
-    style JAVA fill:#fff4e5,stroke:#E76F00,color:#0f172a
-    style G1 fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style G2 fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style G3 fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style G4 fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style G5 fill:#00ADD8,color:#ffffff,stroke:#007d99
-    style J1 fill:#E76F00,color:#ffffff,stroke:#b45309
-    style J2 fill:#E76F00,color:#ffffff,stroke:#b45309
-    style J3 fill:#E76F00,color:#ffffff,stroke:#b45309
-    style J4 fill:#E76F00,color:#ffffff,stroke:#b45309
-    style J5 fill:#E76F00,color:#ffffff,stroke:#b45309
-    style J6 fill:#E76F00,color:#ffffff,stroke:#b45309
-```
-
----
-
-## Project layout
-
-```
-micro-llm/
-├── go/
-│   ├── cmd/
-│   │   ├── tokenize/       ← tokenize a raw text corpus
-│   │   └── generate/       ← generate text from a prompt
-│   └── internal/
-│       ├── tokenizer/      ← build vocab, encode, decode
-│       ├── loader/         ← read exported weight file
-│       ├── inference/      ← forward pass + KV-cache
-│       ├── sampler/        ← temperature, top-k, top-p
-│       └── cli/            ← wires all packages together
-│
-├── java/
-│   └── src/main/java/com/microllm/
-│       ├── tensor/         ← Tensor class and math ops
-│       ├── layers/         ← Embedding, Attention, FFN, Norm
-│       ├── autograd/       ← Variable graph + backprop engine
-│       ├── optim/          ← AdamW and SGD
-│       ├── model/          ← Transformer, TransformerBlock, ModelConfig
-│       ├── train/          ← Trainer, Loss, TokenDataset
-│       └── export/         ← WeightExporter
-│
-├── data/
-│   ├── raw/                ← put your .txt files here
-│   └── tokenized/          ← Go writes integer sequences here
-│
-├── models/
-│   └── exported/           ← Java writes weights here, Go reads them
-│
-├── image/                  ← README banners + architecture diagram
-│
-└── scripts/
-    ├── tokenize.sh
-    ├── train.sh
-    └── generate.sh
-```
-
----
-
-## Running it
+Requirements: Go 1.22+, Java 21+, and Maven. The end-to-end command accepts a plain UTF-8 text file or a directory containing `.txt` files; it prepares tokens and runs training, PTQ, QAT, and benchmarking in sequence.
 
 ```bash
-# step 1 — tokenize the active corpus in data/raw/train.txt
-bash scripts/tokenize.sh
+# Interactive: prompts for the dataset path and optional held-out text
+./start.sh
 
-# step 2 — train the model (Java)
-bash scripts/train.sh
+# Or provide paths directly
+./start.sh run --data /path/to/my-corpus.txt --epochs 100 --qat-epochs 2
 
-# step 3 — generate from a prompt (Go)
-bash scripts/generate.sh
+# Better evaluation: provide a separate held-out text file
+./start.sh run --data /path/to/train.txt --eval /path/to/heldout.txt
 ```
 
----
+Artifacts are written under `models/runs/<dataset-name>/`: tokenized data, FP32, PTQ INT8, QAT INT8, and `benchmark.json`. At completion, the launcher prints the exact paths to both compressed checkpoints and the report. The dataset path may be relative to the directory where `start.sh` is invoked. For a directory input, `.txt` files are read in sorted order. Without `--eval`, the benchmark scores the training corpus, so that run is an integration check rather than a generalization measurement.
 
-## Scale — built for a laptop
+The lower-level commands remain available:
 
-No cloud, no GPU, no special hardware.
+```bash
+# PTQ: quantize an existing checkpoint without training
+./start.sh ptq --input ../models/exported/model.json \
+  --output ../models/quantized/model.ptq.int8.json --scheme per-channel
 
-| Setting | Value | Why |
-|---------|-------|-----|
-| Vocab size | ~256 chars | One ID per printable character — tiny lookup table |
-| Layers | 2 – 4 | Deep enough to learn patterns, light enough to run fast |
-| Model width | 64 or 128 | Stays within normal CPU cache |
-| Attention heads | 2 – 4 | Enough for this scale |
-| Parameters | ~1 million | Trains in minutes, not hours |
-| Dataset size | 1 – 2 MB text | A play, short stories, or small code files |
-| Training RAM | < 20 MB | Laptop stays usable while training |
-| Inference RAM | < 10 MB | Answers come back fast |
+# QAT: load that checkpoint, fine-tune with fake-quantized weights, then emit INT8
+./start.sh qat --input ../models/exported/model.json \
+  --tokens ../data/tokenized/tokens.json --vocab ../data/tokenized/vocab.json \
+  --output ../models/quantized/model.qat.int8.json --epochs 2
 
----
+# Compare all three on the same held-out text, one sequence per line
+./start.sh benchmark --fp32 ../models/exported/model.json \
+  --ptq ../models/quantized/model.ptq.int8.json \
+  --qat ../models/quantized/model.qat.int8.json \
+  --eval ../data/eval/heldout.txt --vocab ../data/tokenized/vocab.json \
+  --report ../models/quantized/benchmark.json
+```
 
-<p align="center">
-  <img src="image/pipeline-strip.svg" alt="text → Go tokenizes → Java trains → weights → Go generates" width="880"/>
-</p>
+For `run`, dataset and evaluation paths are relative to the caller’s current directory. Other low-level command flags are interpreted from the `go/` directory. `./start.sh` with no arguments prompts for a dataset and runs training, PTQ, QAT, and benchmarking. Use `./start.sh ptq` for per-channel PTQ of an existing checkpoint. `./start.sh test` runs Go and Java tests.
 
-<p align="center">
-  <a href="docs/ARCHITECTURE.md"><img src="https://img.shields.io/badge/Architecture%20deep--dive-1e293b?style=for-the-badge" alt="Architecture deep-dive"/></a>
-</p>
+To train a source model from scratch, tokenize a plain text corpus and use the Java trainer:
+
+```bash
+./scripts/tokenize.sh
+./scripts/train.sh --epochs 100 --val-fraction 0.1 --patience 10
+```
+
+## PTQ and QAT
+
+PTQ uses symmetric signed INT8 weights with a zero point of zero. Per-tensor mode uses one scale per tensor; per-channel mode uses one scale per first-dimension channel. Optional calibration stores observed activation ranges, but activation quantization is not implemented.
+
+QAT imports the FP32 checkpoint into the Java model, continues training on causal text windows, and fake-quantizes weights during forward passes. The straight-through estimator sends gradients to the underlying FP32 weights. The resulting fine-tuned weights are then quantized using the same PTQ encoder. QAT artifacts record their method and epoch count in checkpoint metadata.
+
+## Benchmark and current limits
+
+The benchmark compares file size, next-token perplexity, tokens/second, peak Go heap, and dequantized weight size. Use a held-out dataset; a training corpus is only useful as an integration smoke test.
+
+INT8 checkpoints are currently dequantized to float64 before inference. The engine demonstrates checkpoint compression and quality effects; integer matrix kernels, activation quantization, and INT8 inference speedups are not implemented. Its input format is the project’s version 1 JSON export (`format: "microllm"`); ONNX, GGUF, and arbitrary Hugging Face checkpoints are not supported.
+
+## Main code
+
+| Path | Role |
+| --- | --- |
+| `go/cmd/quantize` | PTQ and optional calibration |
+| `go/cmd/qat` | Checkpoint bridge, Java QAT run, final INT8 export |
+| `go/cmd/benchmark` | FP32/PTQ/QAT evaluation and JSON report |
+| `go/internal/quantization` | PTQ, dequantization, checkpoint format and Java bridge |
+| `java/.../model/Transformer.java` | Shared Transformer training and fake-quantized forward path |
+| `java/.../train/Trainer.java` | Causal training and QAT fine-tuning loop |
+
+See [Go commands](go/README.md), [architecture](docs/ARCHITECTURE.md), and [status](STATUS.md).
