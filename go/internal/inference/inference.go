@@ -6,7 +6,20 @@ import (
 	"math"
 )
 
-type Model struct{ Export *loader.Export }
+type QuantizedMatrix struct {
+	Shape      []int
+	Data       []int8
+	Scale      float64
+	ZeroPoint  int
+	Scales     []float64
+	ZeroPoints []int
+	Axis       int
+}
+
+type Model struct {
+	Export    *loader.Export
+	quantized map[string]QuantizedMatrix
+}
 
 func New(e *loader.Export) (*Model, error) {
 	if e == nil {
@@ -15,12 +28,103 @@ func New(e *loader.Export) (*Model, error) {
 	if err := loader.Validate(e); err != nil {
 		return nil, err
 	}
-	return &Model{e}, nil
+	return &Model{Export: e}, nil
 }
 
 type ActivationRange struct {
 	Min float64 `json:"min"`
 	Max float64 `json:"max"`
+}
+
+// NewQuantized creates an inference model that retains rank-two weights as INT8.
+// Small normalization vectors remain float64. Export is validated before its dense
+// matrix slices are released, so inference reads those matrices only from INT8 storage.
+func NewQuantized(e *loader.Export, weights map[string]QuantizedMatrix) (*Model, error) {
+	if err := loader.Validate(e); err != nil {
+		return nil, err
+	}
+	refs := matrixRefs(e)
+	if len(weights) != len(refs) {
+		return nil, fmt.Errorf("have %d quantized matrices; want %d", len(weights), len(refs))
+	}
+	for name, values := range refs {
+		matrix, ok := weights[name]
+		if !ok {
+			return nil, fmt.Errorf("missing quantized matrix %s", name)
+		}
+		if len(matrix.Shape) != 2 || matrix.Shape[0]*matrix.Shape[1] != len(matrix.Data) || len(matrix.Data) != len(*values) {
+			return nil, fmt.Errorf("%s has invalid quantized matrix shape", name)
+		}
+		if len(matrix.Scales) > 0 && (len(matrix.Scales) != len(matrix.ZeroPoints) || (matrix.Axis != 0 && matrix.Axis != 1) || len(matrix.Scales) != matrix.Shape[matrix.Axis]) {
+			return nil, fmt.Errorf("%s has invalid per-channel metadata", name)
+		}
+		if len(matrix.Scales) == 0 && (!(matrix.Scale > 0) || matrix.ZeroPoint != 0) {
+			return nil, fmt.Errorf("%s has invalid per-tensor metadata", name)
+		}
+	}
+	for _, values := range refs {
+		*values = nil
+	}
+	return &Model{Export: e, quantized: weights}, nil
+}
+
+func matrixRefs(e *loader.Export) map[string]*[]float64 {
+	refs := map[string]*[]float64{"token_embedding": &e.Weights.TokenEmbedding, "position_embedding": &e.Weights.PositionEmbedding, "output": &e.Weights.Output}
+	for index := range e.Weights.Layers {
+		layer := &e.Weights.Layers[index]
+		prefix := fmt.Sprintf("layers.%d.", index)
+		refs[prefix+"q"] = &layer.Q
+		refs[prefix+"k"] = &layer.K
+		refs[prefix+"v"] = &layer.V
+		refs[prefix+"o"] = &layer.O
+		refs[prefix+"ffn_in"] = &layer.FFNIn
+		refs[prefix+"ffn_out"] = &layer.FFNOut
+	}
+	return refs
+}
+
+func (m *Model) multiply(name string, input, fallback []float64, inputSize, outputSize int) []float64 {
+	matrix, ok := m.quantized[name]
+	if !ok {
+		return multiplyRowVector(input, fallback, inputSize, outputSize)
+	}
+	output := make([]float64, outputSize)
+	for i, value := range input {
+		for j := 0; j < outputSize; j++ {
+			index := i*outputSize + j
+			scale, zero := matrix.Scale, matrix.ZeroPoint
+			if len(matrix.Scales) > 0 {
+				channel := i
+				if matrix.Axis == 1 {
+					channel = j
+				}
+				scale, zero = matrix.Scales[channel], matrix.ZeroPoints[channel]
+			}
+			output[j] += value * float64(int(matrix.Data[index])-zero) * scale
+		}
+	}
+	return output
+}
+
+func (m *Model) embedding(name string, row, width int, fallback []float64) []float64 {
+	matrix, ok := m.quantized[name]
+	if !ok {
+		return fallback[row*width : (row+1)*width]
+	}
+	values := make([]float64, width)
+	for column := 0; column < width; column++ {
+		index := row*width + column
+		scale, zero := matrix.Scale, matrix.ZeroPoint
+		if len(matrix.Scales) > 0 {
+			channel := row
+			if matrix.Axis == 1 {
+				channel = column
+			}
+			scale, zero = matrix.Scales[channel], matrix.ZeroPoints[channel]
+		}
+		values[column] = float64(int(matrix.Data[index])-zero) * scale
+	}
+	return values
 }
 
 // Logits runs a causal, pre-norm Transformer forward pass and returns next-token logits.
@@ -42,8 +146,10 @@ func (m *Model) LogitsWithActivationRanges(ids []int, ranges map[string]Activati
 			return nil, fmt.Errorf("invalid token ID %d", id)
 		}
 		x[p] = make([]float64, c.DModel)
+		tokenRow := m.embedding("token_embedding", id, c.DModel, w.TokenEmbedding)
+		positionRow := m.embedding("position_embedding", p, c.DModel, w.PositionEmbedding)
 		for d := range x[p] {
-			x[p][d] = w.TokenEmbedding[id*c.DModel+d] + w.PositionEmbedding[p*c.DModel+d]
+			x[p][d] = tokenRow[d] + positionRow[d]
 		}
 	}
 	observeMatrix(ranges, "embedding", x)
@@ -55,9 +161,9 @@ func (m *Model) LogitsWithActivationRanges(ids []int, ranges map[string]Activati
 		observeMatrix(ranges, fmt.Sprintf("layer.%d.attention_norm", layerIndex), norm)
 		q, k, v := make([][]float64, len(x)), make([][]float64, len(x)), make([][]float64, len(x))
 		for p := range x {
-			q[p] = multiplyRowVector(norm[p], l.Q, c.DModel, c.DModel)
-			k[p] = multiplyRowVector(norm[p], l.K, c.DModel, c.DModel)
-			v[p] = multiplyRowVector(norm[p], l.V, c.DModel, c.DModel)
+			q[p] = m.multiply(fmt.Sprintf("layers.%d.q", layerIndex), norm[p], l.Q, c.DModel, c.DModel)
+			k[p] = m.multiply(fmt.Sprintf("layers.%d.k", layerIndex), norm[p], l.K, c.DModel, c.DModel)
+			v[p] = m.multiply(fmt.Sprintf("layers.%d.v", layerIndex), norm[p], l.V, c.DModel, c.DModel)
 		}
 		observeMatrix(ranges, fmt.Sprintf("layer.%d.q", layerIndex), q)
 		observeMatrix(ranges, fmt.Sprintf("layer.%d.k", layerIndex), k)
@@ -81,25 +187,25 @@ func (m *Model) LogitsWithActivationRanges(ids []int, ranges map[string]Activati
 					}
 				}
 			}
-			att[p] = multiplyRowVector(joined, l.O, c.DModel, c.DModel)
+			att[p] = m.multiply(fmt.Sprintf("layers.%d.o", layerIndex), joined, l.O, c.DModel, c.DModel)
 			for d := range x[p] {
 				x[p][d] += att[p][d]
 			}
 		}
 		observeMatrix(ranges, fmt.Sprintf("layer.%d.attention_residual", layerIndex), x)
 		for p := range x {
-			h := multiplyRowVector(rmsNormalize(x[p], l.FFNNorm, c.RMSNormEpsilon), l.FFNIn, c.DModel, c.DFFN)
+			h := m.multiply(fmt.Sprintf("layers.%d.ffn_in", layerIndex), rmsNormalize(x[p], l.FFNNorm, c.RMSNormEpsilon), l.FFNIn, c.DModel, c.DFFN)
 			for i := range h {
 				h[i] = gelu(h[i])
 			}
 			observeVector(ranges, fmt.Sprintf("layer.%d.feed_forward", layerIndex), h)
-			out := multiplyRowVector(h, l.FFNOut, c.DFFN, c.DModel)
+			out := m.multiply(fmt.Sprintf("layers.%d.ffn_out", layerIndex), h, l.FFNOut, c.DFFN, c.DModel)
 			for d := range x[p] {
 				x[p][d] += out[d]
 			}
 		}
 	}
-	logits := multiplyRowVector(rmsNormalize(x[len(x)-1], w.FinalNorm, c.RMSNormEpsilon), w.Output, c.DModel, c.VocabSize)
+	logits := m.multiply("output", rmsNormalize(x[len(x)-1], w.FinalNorm, c.RMSNormEpsilon), w.Output, c.DModel, c.VocabSize)
 	observeVector(ranges, "output_logits", logits)
 	return logits, nil
 }
