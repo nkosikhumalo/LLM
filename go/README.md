@@ -1,78 +1,46 @@
-# Go inference and data-preparation engine
+# MiniLLM Quantization Engine (Go)
 
-Repository owner: [nkosikhumalo](https://github.com/nkosikhumalo).
+Go validates source checkpoints, implements PTQ, coordinates Java QAT, and evaluates FP32/PTQ/QAT models.
 
-This directory is the Go half of MicroLLM:
-
-| Path | Role |
-|------|------|
-| `cmd/tokenize` | Build a greedy wordpiece vocabulary + `tokens.json` from `data/raw/train.txt` by default |
-| `cmd/generate` | One-shot generation with **KV-cache** session |
-| `cmd/chat` | Multi-turn terminal chat (Human/Bot prefixes) |
-| `internal/tokenizer` | Encode / decode / save / load vocab |
-| `internal/loader` | Validate and load Java `model.json` |
-| `internal/inference` | Full `Logits` + incremental `Session` (KV-cache) |
-| `internal/sampler` | Temperature, top-k, top-p, greedy |
-| `internal/cli` | Prompt + streaming helpers |
-
-## Run
-
-From this directory (or use `../scripts/*.sh` from the repo root):
+## PTQ
 
 ```bash
-go test ./...
-
-go run ./cmd/tokenize -input ../data/raw/train.txt -output ../data/tokenized
-
-go run ./cmd/generate \
-  -model ../models/exported/model.json \
-  -vocab ../data/tokenized/vocab.json \
-  -prompt "hello " -tokens 64
-
-go run ./cmd/chat \
-  -model ../models/exported/model.json \
-  -vocab ../data/tokenized/vocab.json
+go run ./cmd/quantize \
+  --input ../models/exported/model.json \
+  --output ../models/quantized/model.ptq.int8.json \
+  --scheme per-channel
 ```
 
-Root helpers: `scripts/tokenize.sh`, `scripts/generate.sh`, `scripts/chat.sh`.
+`--scheme` supports `per-tensor` and `per-channel`. Optional `--calibration TEXT --vocab vocab.json` stores activation ranges as metadata only; it does not quantize activations.
 
-## KV-cache
+## QAT
 
-`Model.NewSession()` keeps per-layer Key/Value rows. `Prefill(ids)` warms the cache; each `Step(id)` only runs the new position. `Logits(ids)` still recomputes the full sequence (used in tests to prove cache matches).
-
-## Java-to-Go model contract
-
-`cmd/generate` / `cmd/chat` expect `models/exported/model.json`. Required envelope:
-
-```json
-{
-  "format": "microllm",
-  "version": 1,
-  "config": {
-    "vocab_size": 256,
-    "d_model": 64,
-    "n_layers": 2,
-    "n_heads": 4,
-    "d_ffn": 256,
-    "max_seq_len": 128,
-    "rms_norm_epsilon": 0.00001
-  },
-  "weights": { "...": "row-major float arrays" }
-}
-```
-
-Train and generate with the **same** `vocab.json`.
-
-## Tests
+Builds/runs the Java trainer through the repository launcher:
 
 ```bash
-go test ./...
+cd ..
+./start.sh qat --input ../models/exported/model.json \
+  --tokens ../data/tokenized/tokens.json --vocab ../data/tokenized/vocab.json \
+  --output ../models/quantized/model.qat.int8.json --epochs 2
 ```
 
-Covers tokenizer round-trip, loader validation, sampler greedy/top-k, and KV-cache vs full forward equality.
+From this module directory, the same command is `go run ./cmd/qat ...` after building `../java/target/microllm-train-0.1.0-SNAPSHOT.jar`. QAT loads pretrained weights, enables fake quantization during the Java training loop, then writes a real INT8 checkpoint.
 
-## Notes
+## Three-way benchmark
 
-- The default input is `data/raw/train.txt`; pass a `.txt` directory to tokenize multiple files. JSON corpora must be converted first.
-- Chat quality depends on the training corpus using the same `Human:` / `Bot:` style you use at inference time.
-- See [`../STATUS.md`](../STATUS.md) for the full project status.
+```bash
+go run ./cmd/benchmark \
+  --fp32 ../models/exported/model.json \
+  --ptq ../models/quantized/model.ptq.int8.json \
+  --qat ../models/quantized/model.qat.int8.json \
+  --eval ../data/eval/heldout.txt --vocab ../data/tokenized/vocab.json \
+  --report ../models/quantized/benchmark.json
+```
+
+The comparison includes file size, next-token perplexity, tokens/second, sampled peak Go heap, and dequantized weight size. Provide held-out text to make perplexity differences meaningful.
+
+## Implementation limits
+
+INT8 values use symmetric scales and zero point zero. Per-channel mode scales along tensor dimension zero. Calibration records activation ranges only. The current inference path expands all checkpoint types to float64, so reported throughput is not an INT8-kernel performance claim and weight memory is the dequantized weight estimate.
+
+Run `go test ./...` for Go tests. `./start.sh test` runs Go and Java tests.
