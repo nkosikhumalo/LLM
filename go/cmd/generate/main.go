@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nkosikhumalo/microllm/internal/cli"
-	"github.com/nkosikhumalo/microllm/internal/inference"
-	"github.com/nkosikhumalo/microllm/internal/loader"
-	"github.com/nkosikhumalo/microllm/internal/sampler"
-	"github.com/nkosikhumalo/microllm/internal/tokenizer"
+	"github.com/nkosikhumalo/microllm/go/internal/cli"
+	"github.com/nkosikhumalo/microllm/go/internal/inference"
+	"github.com/nkosikhumalo/microllm/go/internal/quantization"
+	"github.com/nkosikhumalo/microllm/go/internal/sampler"
+	"github.com/nkosikhumalo/microllm/go/internal/tokenizer"
 )
 
 func main() {
@@ -30,7 +30,7 @@ func main() {
 	seed := flag.Int64("seed", time.Now().UnixNano(), "random seed")
 	flag.Parse()
 
-	modelExport, err := loader.Load(*modelPath)
+	modelExport, err := quantization.LoadModel(*modelPath)
 	if err != nil {
 		fatal("load model: %v", err)
 	}
@@ -50,9 +50,6 @@ func main() {
 		fatal("prompt: %v", err)
 	}
 	promptText = strings.TrimSpace(promptText)
-	if strings.HasSuffix(promptText, " | Bot:") {
-		promptText += " " // match the separator used in train.txt
-	}
 	ids, err := vocab.Encode(promptText)
 	if err != nil {
 		fatal("encode prompt: %v", err)
