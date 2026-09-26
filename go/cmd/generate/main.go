@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/nkosikhumalo/microllm/go/internal/cli"
-	"github.com/nkosikhumalo/microllm/go/internal/inference"
 	"github.com/nkosikhumalo/microllm/go/internal/quantization"
 	"github.com/nkosikhumalo/microllm/go/internal/sampler"
 	"github.com/nkosikhumalo/microllm/go/internal/tokenizer"
@@ -30,20 +29,17 @@ func main() {
 	seed := flag.Int64("seed", time.Now().UnixNano(), "random seed")
 	flag.Parse()
 
-	modelExport, err := quantization.LoadModel(*modelPath)
+	model, err := quantization.LoadInferenceModel(*modelPath)
 	if err != nil {
 		fatal("load model: %v", err)
 	}
+	modelExport := model.Export
 	vocab, err := tokenizer.Load(*vocabPath)
 	if err != nil {
 		fatal("load vocab: %v", err)
 	}
 	if len(vocab.Tokens) != modelExport.Config.VocabSize {
 		fatal("vocabulary size does not match model")
-	}
-	model, err := inference.New(modelExport)
-	if err != nil {
-		fatal("model: %v", err)
 	}
 	promptText, err := cli.Prompt(strings.TrimSpace(*prompt))
 	if err != nil {
