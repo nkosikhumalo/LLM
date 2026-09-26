@@ -97,17 +97,19 @@ func (s *Session) Step(tokenID int) ([]float64, error) {
 
 	position := s.length
 	x := make([]float64, config.DModel)
-	for d := 0; d < config.DModel; d++ {
-		x[d] = weights.TokenEmbedding[tokenID*config.DModel+d] + weights.PositionEmbedding[position*config.DModel+d]
+	tokenRow := s.model.embedding("token_embedding", tokenID, config.DModel, weights.TokenEmbedding)
+	positionRow := s.model.embedding("position_embedding", position, config.DModel, weights.PositionEmbedding)
+	for d := range x {
+		x[d] = tokenRow[d] + positionRow[d]
 	}
 
 	heads := config.NHeads
 	headDim := config.DModel / config.NHeads
 	for layerIndex, layer := range weights.Layers {
 		normed := rmsNormalize(x, layer.AttnNorm, config.RMSNormEpsilon)
-		query := multiplyRowVector(normed, layer.Q, config.DModel, config.DModel)
-		key := multiplyRowVector(normed, layer.K, config.DModel, config.DModel)
-		value := multiplyRowVector(normed, layer.V, config.DModel, config.DModel)
+		query := s.model.multiply(fmt.Sprintf("layers.%d.q", layerIndex), normed, layer.Q, config.DModel, config.DModel)
+		key := s.model.multiply(fmt.Sprintf("layers.%d.k", layerIndex), normed, layer.K, config.DModel, config.DModel)
+		value := s.model.multiply(fmt.Sprintf("layers.%d.v", layerIndex), normed, layer.V, config.DModel, config.DModel)
 		cache := s.caches[layerIndex]
 		cache.Append(key, value)
 
@@ -128,21 +130,21 @@ func (s *Session) Step(tokenID int) ([]float64, error) {
 				}
 			}
 		}
-		attnOut := multiplyRowVector(joined, layer.O, config.DModel, config.DModel)
+		attnOut := s.model.multiply(fmt.Sprintf("layers.%d.o", layerIndex), joined, layer.O, config.DModel, config.DModel)
 		for d := range x {
 			x[d] += attnOut[d]
 		}
 
-		hidden := multiplyRowVector(rmsNormalize(x, layer.FFNNorm, config.RMSNormEpsilon), layer.FFNIn, config.DModel, config.DFFN)
+		hidden := s.model.multiply(fmt.Sprintf("layers.%d.ffn_in", layerIndex), rmsNormalize(x, layer.FFNNorm, config.RMSNormEpsilon), layer.FFNIn, config.DModel, config.DFFN)
 		for i := range hidden {
 			hidden[i] = gelu(hidden[i])
 		}
-		ffnOut := multiplyRowVector(hidden, layer.FFNOut, config.DFFN, config.DModel)
+		ffnOut := s.model.multiply(fmt.Sprintf("layers.%d.ffn_out", layerIndex), hidden, layer.FFNOut, config.DFFN, config.DModel)
 		for d := range x {
 			x[d] += ffnOut[d]
 		}
 	}
 
 	s.length++
-	return multiplyRowVector(rmsNormalize(x, weights.FinalNorm, config.RMSNormEpsilon), weights.Output, config.DModel, config.VocabSize), nil
+	return s.model.multiply("output", rmsNormalize(x, weights.FinalNorm, config.RMSNormEpsilon), weights.Output, config.DModel, config.VocabSize), nil
 }
