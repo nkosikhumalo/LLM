@@ -59,6 +59,19 @@ func (s *Session) Reset() {
 
 // Prefill processes a full prompt and returns logits after the last token.
 func (s *Session) Prefill(ids []int) ([]float64, error) {
+	config := s.model.Export.Config
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("prompt is empty")
+	}
+	if len(ids) > config.MaxSeqLen {
+		return nil, fmt.Errorf("context length %d exceeds max_seq_len %d", len(ids), config.MaxSeqLen)
+	}
+	for _, id := range ids {
+		if id < 0 || id >= config.VocabSize {
+			return nil, fmt.Errorf("invalid token ID %d", id)
+		}
+	}
+
 	s.Reset()
 	var logits []float64
 	var err error
