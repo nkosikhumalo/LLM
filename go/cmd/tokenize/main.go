@@ -6,37 +6,48 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-
+	"github.com/charmbracelet/lipgloss"
 	"github.com/nkosikhumalo/microllm/go/internal/tokenizer"
 )
 
+var (
+	ingestTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("63"))
+	ingestGood  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
+	ingestDim   = lipgloss.NewStyle().Faint(true)
+)
+
 func main() {
-	input := flag.String("input", "../data/raw/train.txt", "UTF-8 text file or directory of text files")
+	input := flag.String("input", "../data/raw/train.txt", "text/document/media-transcript file or directory of files")
 	output := flag.String("output", "../data/tokenized", "destination directory")
 	flag.Parse()
-	files := []string{*input}
-	if info, err := os.Stat(*input); err == nil && info.IsDir() {
-		files, err = filepath.Glob(filepath.Join(*input, "*.txt"))
-		if err != nil {
-			fatal("list input files: %v", err)
-		}
+	fmt.Println(ingestTitle.Render("MiniLLM · Data preparation"))
+	fmt.Println(ingestDim.Render("Extracting learnable text from the selected files"))
+	files, err := collectInputs(*input, *output)
+	if err != nil {
+		fatal("read dataset: %v", err)
 	}
-	if len(files) == 0 {
-		fatal("no .txt files found in %s", *input)
-	}
-	sort.Strings(files)
 	var corpus strings.Builder
+	used := 0
 	for _, path := range files {
-		data, err := os.ReadFile(path)
+		text, err := extractFileText(path)
 		if err != nil {
-			fatal("read %s: %v", path, err)
+			fatal("ingest failed: %v", err)
 		}
-		if corpus.Len() > 0 {
-			corpus.WriteByte('\n')
+		if strings.TrimSpace(text) == "" {
+			continue
 		}
-		corpus.Write(data)
+		if used > 0 {
+			corpus.WriteString("\n\n")
+		}
+		corpus.WriteString("Source: ")
+		corpus.WriteString(filepath.Base(path))
+		corpus.WriteByte('\n')
+		corpus.WriteString(text)
+		used++
+	}
+	if used == 0 {
+		fatal("no readable text was extracted from %s", *input)
 	}
 	vocab, err := tokenizer.Build(corpus.String())
 	if err != nil {
@@ -65,7 +76,8 @@ func main() {
 	if err := os.WriteFile(filepath.Join(*output, "tokens.json"), encoded, 0644); err != nil {
 		fatal("save token IDs: %v", err)
 	}
-	fmt.Printf("wrote %d tokens and %d vocabulary entries to %s\n", len(ids), len(vocab.Tokens), *output)
+	fmt.Println(ingestGood.Render(fmt.Sprintf("Ready · %d files · %d tokens · %d vocabulary entries", used, len(ids), len(vocab.Tokens))))
+	fmt.Println(ingestDim.Render("Prepared corpus: " + filepath.Join(*output, "corpus.txt")))
 }
 
 func fatal(format string, args ...any) {
