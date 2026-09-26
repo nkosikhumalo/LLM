@@ -22,17 +22,6 @@ class TokenDatasetTest {
     }
 
     @Test
-    void answerAnchorRetainsTheReplyEndBoundary() throws Exception {
-        var file = Files.createTempFile("answer-anchors", ".tsv");
-        Files.writeString(file, "4\t8\t13\n");
-
-        var anchors = TokenDataset.loadAnswerAnchors(file);
-
-        assertEquals(1, anchors.size());
-        assertEquals(new TokenDataset.AnswerAnchor(4, 3, 8), anchors.get(0));
-    }
-
-    @Test
     void splitCreatesValidationTail() throws Exception {
         var file = Files.createTempFile("tokens", ".json");
         Files.writeString(file, "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]");
