@@ -22,6 +22,7 @@ public final class Transformer {
     private final Tensor[] layerWeights;
     private final Random dropoutRandom;
     private static final double DROPOUT_RATE = 0.1;
+    private boolean fakeQuantization;
 
     public Transformer(ModelConfig config, long seed) {
         this.config = config;
@@ -68,6 +69,62 @@ public final class Transformer {
         return layerWeights[index];
     }
 
+    public void setFakeQuantization(boolean enabled) {
+        fakeQuantization = enabled;
+    }
+
+    public void loadParameters(List<double[]> parameters) {
+        List<Tensor> expected = trainableParameters();
+        if (parameters.size() != expected.size()) throw new IllegalArgumentException("checkpoint tensor count mismatch");
+        for (int i = 0; i < expected.size(); i++) {
+            if (parameters.get(i).length != expected.get(i).size()) {
+                throw new IllegalArgumentException("checkpoint tensor " + i + " has an invalid size");
+            }
+            System.arraycopy(parameters.get(i), 0, expected.get(i).values(), 0, expected.get(i).size());
+        }
+    }
+
+    /** Symmetric signed INT8 fake quantization with a straight-through gradient. */
+    public static double[] fakeQuantizeWeights(double[] values) {
+        return fakeQuantizeSegment(values, 0, values.length);
+    }
+
+    /** Fake-quantizes each first-dimension channel using the PTQ per-channel rule. */
+    public static double[] fakeQuantizeWeights(double[] values, int... shape) {
+        if (shape.length < 2) return fakeQuantizeWeights(values);
+        int channels = shape[0];
+        int stride = 1;
+        for (int axis = 1; axis < shape.length; axis++) stride = Math.multiplyExact(stride, shape[axis]);
+        if (channels < 1 || channels * stride != values.length) throw new IllegalArgumentException("weight shape does not match values");
+        double[] result = new double[values.length];
+        for (int channel = 0; channel < channels; channel++) {
+            double[] slice = java.util.Arrays.copyOfRange(values, channel * stride, (channel + 1) * stride);
+            double[] quantized = fakeQuantizeSegment(slice, 0, slice.length);
+            System.arraycopy(quantized, 0, result, channel * stride, stride);
+        }
+        return result;
+    }
+
+    private static double[] fakeQuantizeSegment(double[] values, int start, int length) {
+        double maxAbs = 0.0;
+        for (int i = start; i < start + length; i++) {
+            double value = values[i];
+            if (!Double.isFinite(value)) throw new IllegalArgumentException("weight contains a non-finite value");
+            maxAbs = Math.max(maxAbs, Math.abs(value));
+        }
+        double scale = maxAbs == 0.0 ? 1.0 : maxAbs / 127.0;
+        double[] result = new double[length];
+        for (int i = 0; i < length; i++) {
+            double quantized = Math.max(-127, Math.min(127, Math.rint(values[start + i] / scale)));
+            result[i] = quantized * scale;
+        }
+        return result;
+    }
+
+    private double[] forwardWeights(Tensor tensor) {
+        return fakeQuantization ? fakeQuantizeWeights(tensor.values(), tensor.shape()) : tensor.values();
+    }
+
     public List<Tensor> trainableParameters() {
         List<Tensor> parameters = new ArrayList<>();
         parameters.add(tokenEmbedding);
@@ -89,23 +146,14 @@ public final class Transformer {
     }
 
     public double trainWindow(int[] input, int[] target, int start) {
-        return trainWindow(input, target, start, 0);
-    }
-
-    /** Trains on target tokens at or after firstTargetIndex. */
-    public double trainWindow(int[] input, int[] target, int start, int firstTargetIndex) {
-        return runWindow(input, target, start, true, firstTargetIndex);
+        return runWindow(input, target, start, true);
     }
 
     public double evaluateWindow(int[] input, int[] target, int start) {
-        return evaluateWindow(input, target, start, 0);
+        return runWindow(input, target, start, false);
     }
 
-    public double evaluateWindow(int[] input, int[] target, int start, int firstTargetIndex) {
-        return runWindow(input, target, start, false, firstTargetIndex);
-    }
-
-    private double runWindow(int[] input, int[] target, int start, boolean train, int firstTargetIndex) {
+    private double runWindow(int[] input, int[] target, int start, boolean train) {
         if (input.length == 0 || input.length != target.length || input.length > config.maxSeqLen()) {
             throw new IllegalArgumentException("invalid window");
         }
@@ -117,18 +165,21 @@ public final class Transformer {
             if (token < 0 || token >= config.vocabSize()) throw new IllegalArgumentException("target token outside vocabulary");
         }
         int n = input.length;
-        if (firstTargetIndex < 0 || firstTargetIndex >= n) {
-            throw new IllegalArgumentException("first target index outside window");
-        }
-        int supervisedTokens = n - firstTargetIndex;
+        int supervisedTokens = n;
         int d = config.dModel();
         int v = config.vocabSize();
+        double[] tokenWeights = forwardWeights(tokenEmbedding);
+        double[] positionWeights = forwardWeights(positionEmbedding);
+        double[] finalNormWeights = forwardWeights(finalNorm);
+        double[] outputWeights = forwardWeights(output);
+        double[][] layerForwardWeights = new double[layerWeights.length][];
+        for (int i = 0; i < layerWeights.length; i++) layerForwardWeights[i] = forwardWeights(layerWeights[i]);
 
         double[][] x = new double[n][d];
         for (int p = 0; p < n; p++) {
             int position = p;
             for (int i = 0; i < d; i++) {
-                x[p][i] = tokenEmbedding.get(input[p] * d + i) + positionEmbedding.get(position * d + i);
+                x[p][i] = tokenWeights[input[p] * d + i] + positionWeights[position * d + i];
             }
         }
 
@@ -138,15 +189,15 @@ public final class Transformer {
             double[][] residualIn = copyRows(x);
             double[][] attnNormed = new double[n][d];
             for (int p = 0; p < n; p++) {
-                attnNormed[p] = rms(x[p], layerWeights[base]);
+                attnNormed[p] = rms(x[p], layerForwardWeights[base]);
             }
             MultiHeadAttention attention = new MultiHeadAttention(
                     d,
                     config.nHeads(),
-                    layerWeights[base + 1].values(),
-                    layerWeights[base + 2].values(),
-                    layerWeights[base + 3].values(),
-                    layerWeights[base + 4].values());
+                    layerForwardWeights[base + 1],
+                    layerForwardWeights[base + 2],
+                    layerForwardWeights[base + 3],
+                    layerForwardWeights[base + 4]);
             MultiHeadAttention.Cache attnCache = attention.forward(attnNormed, train ? DROPOUT_RATE : 0.0, dropoutRandom);
             double[][] afterAttn = new double[n][d];
             for (int p = 0; p < n; p++) {
@@ -156,13 +207,13 @@ public final class Transformer {
             }
             double[][] ffnNormed = new double[n][d];
             for (int p = 0; p < n; p++) {
-                ffnNormed[p] = rms(afterAttn[p], layerWeights[base + 5]);
+                ffnNormed[p] = rms(afterAttn[p], layerForwardWeights[base + 5]);
             }
             FeedForward ffn = new FeedForward(
                     d,
                     config.dFfn(),
-                    layerWeights[base + 6].values(),
-                    layerWeights[base + 7].values());
+                    layerForwardWeights[base + 6],
+                    layerForwardWeights[base + 7]);
             FeedForward.Cache ffnCache = ffn.forward(ffnNormed, train ? DROPOUT_RATE : 0.0, dropoutRandom);
             double[][] next = new double[n][d];
             for (int p = 0; p < n; p++) {
@@ -177,21 +228,20 @@ public final class Transformer {
         double loss = 0.0;
         double[][] gradX = new double[n][d];
         for (int p = 0; p < n; p++) {
-            double[] normalized = rms(x[p], finalNorm);
-            double[] probabilities = Ops.softmax(row(normalized, output, d, v));
-            boolean supervised = p >= firstTargetIndex;
-            if (supervised) loss -= Math.log(Math.max(probabilities[target[p]], 1e-12));
-            if (train && supervised) {
+            double[] normalized = rms(x[p], finalNormWeights);
+            double[] probabilities = Ops.softmax(row(normalized, outputWeights, d, v));
+            loss -= Math.log(Math.max(probabilities[target[p]], 1e-12));
+            if (train) {
                 probabilities[target[p]] -= 1.0;
                 double[] gradNorm = new double[d];
                 for (int i = 0; i < d; i++) {
                     for (int j = 0; j < v; j++) {
                         double gradient = probabilities[j] / supervisedTokens;
                         output.gradient()[i * v + j] += normalized[i] * gradient;
-                        gradNorm[i] += output.get(i * v + j) * gradient;
+                        gradNorm[i] += outputWeights[i * v + j] * gradient;
                     }
                 }
-                gradX[p] = rmsBack(gradNorm, x[p], finalNorm);
+                gradX[p] = rmsBack(gradNorm, x[p], finalNorm, finalNormWeights);
             }
         }
         if (!train) {
@@ -205,15 +255,15 @@ public final class Transformer {
             FeedForward ffn = new FeedForward(
                     d,
                     config.dFfn(),
-                    layerWeights[base + 6].values(),
-                    layerWeights[base + 7].values());
+                    layerForwardWeights[base + 6],
+                    layerForwardWeights[base + 7]);
             FeedForward.Gradients ffnGrad = ffn.backward(cache.ffn(), gradX);
             add(layerWeights[base + 6].gradient(), ffnGrad.inWeight());
             add(layerWeights[base + 7].gradient(), ffnGrad.outWeight());
 
             double[][] gradAfterAttn = new double[n][d];
             for (int p = 0; p < n; p++) {
-                double[] fromFfn = rmsBack(ffnGrad.input()[p], cache.afterAttn()[p], layerWeights[base + 5]);
+                double[] fromFfn = rmsBack(ffnGrad.input()[p], cache.afterAttn()[p], layerWeights[base + 5], layerForwardWeights[base + 5]);
                 for (int i = 0; i < d; i++) {
                     gradAfterAttn[p][i] = gradX[p][i] + fromFfn[i];
                 }
@@ -222,10 +272,10 @@ public final class Transformer {
             MultiHeadAttention attention = new MultiHeadAttention(
                     d,
                     config.nHeads(),
-                    layerWeights[base + 1].values(),
-                    layerWeights[base + 2].values(),
-                    layerWeights[base + 3].values(),
-                    layerWeights[base + 4].values());
+                    layerForwardWeights[base + 1],
+                    layerForwardWeights[base + 2],
+                    layerForwardWeights[base + 3],
+                    layerForwardWeights[base + 4]);
             MultiHeadAttention.Gradients attnGrad = attention.backward(cache.attention(), gradAfterAttn);
             add(layerWeights[base + 1].gradient(), attnGrad.q());
             add(layerWeights[base + 2].gradient(), attnGrad.k());
@@ -234,7 +284,7 @@ public final class Transformer {
 
             double[][] nextGrad = new double[n][d];
             for (int p = 0; p < n; p++) {
-                double[] fromAttn = rmsBack(attnGrad.input()[p], cache.residualIn()[p], layerWeights[base]);
+                double[] fromAttn = rmsBack(attnGrad.input()[p], cache.residualIn()[p], layerWeights[base], layerForwardWeights[base]);
                 for (int i = 0; i < d; i++) {
                     nextGrad[p][i] = gradAfterAttn[p][i] + fromAttn[i];
                 }
@@ -252,7 +302,7 @@ public final class Transformer {
         return loss / supervisedTokens;
     }
 
-    private double[] rms(double[] x, Tensor scale) {
+    private double[] rms(double[] x, double[] scale) {
         double sumSquares = 0.0;
         for (double value : x) {
             sumSquares += value * value;
@@ -260,32 +310,32 @@ public final class Transformer {
         double inv = 1.0 / Math.sqrt(sumSquares / x.length + config.rmsNormEpsilon());
         double[] y = new double[x.length];
         for (int i = 0; i < x.length; i++) {
-            y[i] = x[i] * inv * scale.get(i);
+            y[i] = x[i] * inv * scale[i];
         }
         return y;
     }
 
-    private double[] rmsBack(double[] grad, double[] x, Tensor scale) {
+    private double[] rmsBack(double[] grad, double[] x, Tensor trainableScale, double[] scale) {
         double sumSquares = 0.0;
         double dot = 0.0;
         for (int i = 0; i < x.length; i++) {
             sumSquares += x[i] * x[i];
-            dot += grad[i] * scale.get(i) * x[i];
+            dot += grad[i] * scale[i] * x[i];
         }
         double inv = 1.0 / Math.sqrt(sumSquares / x.length + config.rmsNormEpsilon());
         double[] dx = new double[x.length];
         for (int i = 0; i < x.length; i++) {
-            scale.gradient()[i] += x[i] * inv * grad[i];
-            dx[i] = inv * grad[i] * scale.get(i) - x[i] * dot * inv * inv * inv / x.length;
+            trainableScale.gradient()[i] += x[i] * inv * grad[i];
+            dx[i] = inv * grad[i] * scale[i] - x[i] * dot * inv * inv * inv / x.length;
         }
         return dx;
     }
 
-    private static double[] row(double[] x, Tensor matrix, int rows, int cols) {
+    private static double[] row(double[] x, double[] matrix, int rows, int cols) {
         double[] y = new double[cols];
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
-                y[j] += x[i] * matrix.get(i * cols + j);
+                y[j] += x[i] * matrix[i * cols + j];
             }
         }
         return y;
