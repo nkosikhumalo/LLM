@@ -2,7 +2,7 @@ package inference
 
 import (
 	"fmt"
-	"github.com/nkosikhumalo/microllm/internal/loader"
+	"github.com/nkosikhumalo/microllm/go/internal/loader"
 	"math"
 )
 
@@ -18,8 +18,17 @@ func New(e *loader.Export) (*Model, error) {
 	return &Model{e}, nil
 }
 
+type ActivationRange struct {
+	Min float64 `json:"min"`
+	Max float64 `json:"max"`
+}
+
 // Logits runs a causal, pre-norm Transformer forward pass and returns next-token logits.
-func (m *Model) Logits(ids []int) ([]float64, error) {
+func (m *Model) Logits(ids []int) ([]float64, error) { return m.LogitsWithActivationRanges(ids, nil) }
+
+// LogitsWithActivationRanges optionally collects observed ranges for embedding,
+// attention, feed-forward, residual, and output values while running inference.
+func (m *Model) LogitsWithActivationRanges(ids []int, ranges map[string]ActivationRange) ([]float64, error) {
 	c, w := m.Export.Config, m.Export.Weights
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("prompt is empty")
@@ -37,17 +46,22 @@ func (m *Model) Logits(ids []int) ([]float64, error) {
 			x[p][d] = w.TokenEmbedding[id*c.DModel+d] + w.PositionEmbedding[p*c.DModel+d]
 		}
 	}
-	for _, l := range w.Layers {
+	observeMatrix(ranges, "embedding", x)
+	for layerIndex, l := range w.Layers {
 		norm := make([][]float64, len(x))
 		for p := range x {
 			norm[p] = rmsNormalize(x[p], l.AttnNorm, c.RMSNormEpsilon)
 		}
+		observeMatrix(ranges, fmt.Sprintf("layer.%d.attention_norm", layerIndex), norm)
 		q, k, v := make([][]float64, len(x)), make([][]float64, len(x)), make([][]float64, len(x))
 		for p := range x {
 			q[p] = multiplyRowVector(norm[p], l.Q, c.DModel, c.DModel)
 			k[p] = multiplyRowVector(norm[p], l.K, c.DModel, c.DModel)
 			v[p] = multiplyRowVector(norm[p], l.V, c.DModel, c.DModel)
 		}
+		observeMatrix(ranges, fmt.Sprintf("layer.%d.q", layerIndex), q)
+		observeMatrix(ranges, fmt.Sprintf("layer.%d.k", layerIndex), k)
+		observeMatrix(ranges, fmt.Sprintf("layer.%d.v", layerIndex), v)
 		heads, hd := c.NHeads, c.DModel/c.NHeads
 		att := make([][]float64, len(x))
 		for p := range x {
@@ -72,18 +86,22 @@ func (m *Model) Logits(ids []int) ([]float64, error) {
 				x[p][d] += att[p][d]
 			}
 		}
+		observeMatrix(ranges, fmt.Sprintf("layer.%d.attention_residual", layerIndex), x)
 		for p := range x {
 			h := multiplyRowVector(rmsNormalize(x[p], l.FFNNorm, c.RMSNormEpsilon), l.FFNIn, c.DModel, c.DFFN)
 			for i := range h {
 				h[i] = gelu(h[i])
 			}
+			observeVector(ranges, fmt.Sprintf("layer.%d.feed_forward", layerIndex), h)
 			out := multiplyRowVector(h, l.FFNOut, c.DFFN, c.DModel)
 			for d := range x[p] {
 				x[p][d] += out[d]
 			}
 		}
 	}
-	return multiplyRowVector(rmsNormalize(x[len(x)-1], w.FinalNorm, c.RMSNormEpsilon), w.Output, c.DModel, c.VocabSize), nil
+	logits := multiplyRowVector(rmsNormalize(x[len(x)-1], w.FinalNorm, c.RMSNormEpsilon), w.Output, c.DModel, c.VocabSize)
+	observeVector(ranges, "output_logits", logits)
+	return logits, nil
 }
 
 // multiplyRowVector multiplies a row vector by a row-major matrix.
@@ -132,4 +150,28 @@ func softmax(values []float64) {
 
 func gelu(value float64) float64 {
 	return 0.5 * value * (1 + math.Tanh(math.Sqrt(2/math.Pi)*(value+0.044715*value*value*value)))
+}
+
+func observeVector(ranges map[string]ActivationRange, name string, values []float64) {
+	if ranges == nil || len(values) == 0 {
+		return
+	}
+	current, ok := ranges[name]
+	if !ok {
+		current = ActivationRange{Min: math.Inf(1), Max: math.Inf(-1)}
+	}
+	for _, v := range values {
+		if v < current.Min {
+			current.Min = v
+		}
+		if v > current.Max {
+			current.Max = v
+		}
+	}
+	ranges[name] = current
+}
+func observeMatrix(ranges map[string]ActivationRange, name string, values [][]float64) {
+	for _, row := range values {
+		observeVector(ranges, name, row)
+	}
 }
