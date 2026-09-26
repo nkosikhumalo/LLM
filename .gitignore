@@ -22,3 +22,8 @@ models/exported/*
 # OS
 .DS_Store
 Thumbs.db
+models/quantized/*
+!models/quantized/.gitkeep
+
+# Generated end-to-end training and benchmark runs
+models/runs/
